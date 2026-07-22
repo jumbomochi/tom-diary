@@ -1264,6 +1264,35 @@ git commit -m "feat(ink): wire Pointer Events -> write/erase/idle-commit/help"
 
 ---
 
+## Post-review hardening (applied after the whole-branch review)
+
+The final whole-branch review approved the branch "with fixes." One follow-up
+commit hardened `initInk`'s pointer lifecycle (the happy path was already
+correct and tested); the verbatim Step 3 `initInk` above is the pre-hardening
+form. The shipped `js/ink.js` additionally:
+
+- Ignores concurrent secondary pointers (tracks `activePointerId`; filters
+  `pointermove`/`pointerup` by `e.pointerId`; `setPointerCapture` on down) — a
+  palm or second finger no longer corrupts the active stroke.
+- Handles `pointercancel` (resets `penDown`/`activePointerId`, calls
+  `timer.penUp()`), so a cancelled pointer can no longer wedge the idle-commit
+  loop for the session. A cancelled in-flight stroke is discarded.
+- Starts a stroke lazily on the first above-gate sample (via a `strokeStarted`
+  flag + a shared `feed()`), so a sub-threshold first pen sample no longer
+  drops the whole stroke.
+
+Tests added: `pointercancel does not wedge the idle-commit loop` and `a
+concurrent second pointer does not corrupt the active stroke`
+(`tests/browser/ink-surface.spec.js`), plus a pixel-color assertion in
+`tests/browser/commit-render.spec.js` that decodes the PNG and confirms
+black-on-white (enforcing that Global Constraint). `app-boot.js` exposes
+`window.__ink` for the concurrent-pointer test.
+
+Deferred (tracked, not fixed here): the committed `store` is not cleared after
+`onCommit` — this belongs to **Plan 4's Listening→Drinking transition** and is
+a **Plan 4 entry criterion**, not a Plan 1 defect. Scribble-erase and "!"
+thresholds remain Open Risks for hand-tuning on real hardware.
+
 ## Self-Review
 
 **1. Spec coverage (Plan 1 scope only):**
