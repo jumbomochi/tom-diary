@@ -18,3 +18,65 @@ export function turnText(catalogLines) {
   }
   return `Memory catalog (newest first):\n${catalogLines.join('\n')}\n\nReply to what is written in the diary.`;
 }
+
+const SHOW_OPEN = '⟦';  // ⟦
+const SHOW_CLOSE = '⟧'; // ⟧
+
+const utf8 = new TextEncoder();
+const byteLen = (s) => utf8.encode(s).length;
+
+/**
+ * End of the LAST complete sentence in `text` at/after index `from`: a
+ * `.!?…` followed by whitespace or end-of-text, at least 4 bytes past `from`.
+ * Returns the index just past the punctuation, or null. (oracle.rs:614-626)
+ */
+export function sentenceCut(text, from) {
+  const tail = text.slice(from);
+  let cut = null;
+  for (let i = 0; i < tail.length; ) {
+    const cp = tail.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    const step = ch.length; // 1 or 2 code units
+    if (ch === '.' || ch === '!' || ch === '?' || ch === '…') {
+      const end = i + step; // index within tail, just past the punctuation
+      const next = end < tail.length ? tail[end] : null;
+      if ((next === null || /\s/.test(next)) && byteLen(tail.slice(0, end)) >= 4) {
+        cut = from + end;
+      }
+    }
+    i += step;
+  }
+  return cut;
+}
+
+/** Trim, then strip at most one wrapping pair of double-quotes. (oracle.rs:580-585) */
+export function clean(s) {
+  let t = s.trim();
+  if (t.startsWith('"')) t = t.slice(1);
+  if (t.endsWith('"')) t = t.slice(0, -1);
+  return t;
+}
+
+/**
+ * Remove every ⟦…⟧ span (an unterminated tail is dropped), then collapse
+ * whitespace. Directive-free text is returned unchanged. (oracle.rs:590-608)
+ */
+export function stripDirectives(s) {
+  if (!s.includes(SHOW_OPEN)) return s;
+  let out = '';
+  let rest = s;
+  let open;
+  while ((open = rest.indexOf(SHOW_OPEN)) !== -1) {
+    out += rest.slice(0, open);
+    const after = rest.slice(open);
+    const close = after.indexOf(SHOW_CLOSE);
+    if (close !== -1) {
+      rest = after.slice(close + SHOW_CLOSE.length);
+    } else {
+      rest = ''; // unterminated: drop the tail
+      break;
+    }
+  }
+  out += rest;
+  return out.split(/\s+/).filter(Boolean).join(' ');
+}
