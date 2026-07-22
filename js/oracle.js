@@ -200,3 +200,104 @@ export function sseDeltaContent(dataLine) {
     return null;
   }
 }
+
+export const DEFAULT_BASE = 'https://api.openai.com/v1';
+export const DEFAULT_MAX_TOKENS = 2000;
+export const CONNECT_TIMEOUT_MS = 10000;
+export const READ_TIMEOUT_MS = 90000;
+
+const errMsg = (e) => (e && e.message ? e.message : String(e));
+
+/**
+ * Fire one turn against an OpenAI-compatible /chat/completions endpoint,
+ * streaming reply events to the handlers. `fetch` is injectable via deps.
+ * Ported from oracle.rs HttpOracle.ask (431-568).
+ */
+export async function askOracle(config, turn, handlers, deps = {}) {
+  const fetchImpl = deps.fetch || globalThis.fetch;
+  const {
+    base = DEFAULT_BASE, key, model,
+    maxTokens = DEFAULT_MAX_TOKENS, reasoning = null, remember = true,
+  } = config;
+  const { imageDataUri, history = [], catalogLines = [], catalogIds = [] } = turn;
+
+  const url = base.replace(/\/+$/, '') + '/chat/completions';
+  const messages = buildMessages({ remember, history, catalogLines, imageDataUri });
+
+  const controller = new AbortController();
+  let timer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+  const arm = (ms) => { clearTimeout(timer); timer = setTimeout(() => controller.abort(), ms); };
+
+  const doRequest = (capField) => fetchImpl(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildRequestBody({ model, maxTokens, capField, reasoning, messages })),
+    signal: controller.signal,
+  });
+
+  let resp;
+  try {
+    resp = await doRequest('max_tokens');
+    if (resp.status === 400) {
+      const detail = await resp.text();
+      if (detail.includes('max_completion_tokens')) {
+        resp = await doRequest('max_completion_tokens');
+      } else {
+        clearTimeout(timer);
+        handlers.onError(`http 400: ${detail.trim()}`);
+        return;
+      }
+    }
+    if (!resp.ok) {
+      const detail = await resp.text();
+      clearTimeout(timer);
+      handlers.onError(`http ${resp.status}: ${detail.trim()}`);
+      return;
+    }
+  } catch (e) {
+    clearTimeout(timer);
+    handlers.onError(`request failed: ${errMsg(e)}`);
+    return;
+  }
+
+  const parser = createStreamParser(catalogIds);
+  const dispatch = (events) => {
+    for (const ev of events) {
+      if (ev.type === 'ink') handlers.onInk(ev.value);
+      else if (ev.type === 'show') handlers.onShow(ev.value);
+      else if (ev.type === 'transcript') handlers.onTranscript(ev.value);
+      else if (ev.type === 'error') handlers.onError(ev.value);
+    }
+  };
+
+  try {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let acc = '';
+    let stop = false;
+    while (!stop) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      arm(READ_TIMEOUT_MS);
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice('data:'.length).trim();
+        if (data === '[DONE]') { stop = true; break; }
+        const frag = sseDeltaContent(data);
+        if (!frag) continue; // null or empty
+        acc += frag;
+        dispatch(parser.advance(acc, false));
+      }
+    }
+    dispatch(parser.advance(acc, true));
+  } catch (e) {
+    dispatch([{ type: 'error', value: `request failed: ${errMsg(e)}` }]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
