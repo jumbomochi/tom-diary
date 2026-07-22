@@ -123,3 +123,63 @@ export function memoryEnabled(value) {
   const v = String(value).toLowerCase();
   return !(v === 'off' || v === '0' || v === 'no' || v === 'false');
 }
+
+const DB_NAME = 'tom-diary';
+const STORE = 'pages';
+
+const reqPromise = (req) => new Promise((resolve, reject) => {
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => reject(req.error);
+});
+
+/** Open (or create) the memory DB. keyPath 'id' = the page's commit timestamp. */
+export function openMemoryDb(factory = globalThis.indexedDB) {
+  return new Promise((resolve, reject) => {
+    const req = factory.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** A CRUD + context-building facade over the pages store. */
+export function createMemoryStore(db, { offsetHours = 0 } = {}) {
+  const tx = (mode) => db.transaction(STORE, mode).objectStore(STORE);
+
+  const all = async () => {
+    const rows = await reqPromise(tx('readonly').getAll());
+    return rows.sort((a, b) => a.id - b.id); // oldest-first
+  };
+
+  const prune = async () => {
+    const rows = await all();
+    if (rows.length <= MAX_MEMORIES) return;
+    const store = tx('readwrite');
+    const done = new Promise((resolve, reject) => {
+      store.transaction.oncomplete = () => resolve();
+      store.transaction.onerror = () => reject(store.transaction.error);
+    });
+    for (const e of rows.slice(0, rows.length - MAX_MEMORIES)) store.delete(e.id);
+    await done;
+  };
+
+  return {
+    all,
+    async append(id, transcript, reply, inkStrokes) {
+      const strokes = decimate(strokesToTriples(inkStrokes));
+      await reqPromise(tx('readwrite').put({ id, transcript, reply, strokes }));
+      await prune();
+    },
+    async get(id) { return reqPromise(tx('readonly').get(id)); },
+    async strokes(id) {
+      const e = await reqPromise(tx('readonly').get(id));
+      return e ? e.strokes : undefined;
+    },
+    async catalog(max) { return catalog(await all(), max, offsetHours); },
+    async recentDialogue(n) { return recentDialogue(await all(), n); },
+    async clear() { await reqPromise(tx('readwrite').clear()); },
+  };
+}
