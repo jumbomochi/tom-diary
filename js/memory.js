@@ -89,3 +89,37 @@ export function gist(entry) {
   if (entry.transcript.trim() === '') return `(reply: ${oneLine(entry.reply, 70)})`;
   return oneLine(entry.transcript, 70);
 }
+
+/**
+ * Numbered newest-first catalog + id map. entries are oldest-first; take the
+ * newest `max`. lines[i] = "{i+1}. {spokenDate} — {gist}". (memory.rs:175-190)
+ */
+export function catalog(entries, max, offsetHours = 0) {
+  const newestFirst = entries.slice().reverse().slice(0, max);
+  const lines = [];
+  const ids = [];
+  newestFirst.forEach((e, i) => {
+    lines.push(`${i + 1}. ${spokenDate(e.id, offsetHours)} — ${gist(e)}`);
+    ids.push(e.id);
+  });
+  return { lines, ids };
+}
+
+/**
+ * The last `n` turns as (transcript, reply), oldest-first, skipping empty
+ * transcripts. Filtering happens within the last-n window. (memory.rs:159-170)
+ */
+export function recentDialogue(entries, n) {
+  return entries
+    .slice().reverse().slice(0, n)
+    .filter((e) => e.transcript !== '')
+    .map((e) => [e.transcript, e.reply])
+    .reverse();
+}
+
+/** The memory on/off gate. Off only for off|0|no|false. (memory.rs:43-46) */
+export function memoryEnabled(value) {
+  if (value == null) return true;
+  const v = String(value).toLowerCase();
+  return !(v === 'off' || v === '0' || v === 'no' || v === 'false');
+}
