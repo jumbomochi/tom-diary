@@ -12,6 +12,7 @@
   "devDependencies": {
     "vitest": "^2.1.0",
     "jsdom": "^25.0.0",
-    "@playwright/test": "^1.48.0"
+    "@playwright/test": "^1.48.0",
+    "opentype.js": "^2.0.0"
   }
 }
