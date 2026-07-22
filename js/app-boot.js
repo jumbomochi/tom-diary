@@ -11,9 +11,10 @@ function resize() {
 resize();
 
 const idle = Number(new URLSearchParams(location.search).get('idle')) || 2800;
-initInk(canvas, {
+const ink = initInk(canvas, {
   idleMs: idle,
   onCommit: (uri) => { window.__lastCommit = uri; },
   onHelp: () => showHelpPanel(document.body, { onDismiss: () => {} }),
 });
+window.__ink = ink;
 document.body.dataset.ready = 'true';

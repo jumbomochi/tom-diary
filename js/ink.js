@@ -83,8 +83,10 @@ export function initInk(canvas, { onCommit, onHelp, idleMs = 2800 } = {}) {
   const ctx = canvas.getContext('2d');
   const store = createStrokeStore();
   let penDown = false;
+  let activePointerId = null;
   let prevR = null;
   let livePts = [];
+  let strokeStarted = false;
 
   const cssW = () => canvas.clientWidth;
   const cssH = () => canvas.clientHeight;
@@ -119,49 +121,61 @@ export function initInk(canvas, { onCommit, onHelp, idleMs = 2800 } = {}) {
     if (onCommit) onCommit(uri, snapshot);
   }
 
-  canvas.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'pen' && e.pressure < PRESSURE_GATE) return;
-    penDown = true;
-    prevR = null;
-    livePts = [];
-    timer.penDown();
-    addPoint(e, true);
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!penDown) return;
-    if (e.pointerType === 'pen' && e.pressure < PRESSURE_GATE) return;
-    addPoint(e, false);
-    timer.activity();
-  });
-  canvas.addEventListener('pointerup', () => {
-    if (!penDown) return;
-    penDown = false;
-    if (isEraserStroke(livePts)) {
-      // discard as ink; erase along the path instead
-      for (const p of livePts) store.erase(p.x, p.y, 22);
-      repaint();
-    } else {
-      store.end();
-    }
-    livePts = [];
-    timer.penUp();
-  });
-
-  function addPoint(e, isStart) {
+  function feed(e) {
+    const pressure = e.pointerType === 'pen' ? e.pressure : 0.5;
+    if (e.pointerType === 'pen' && pressure < PRESSURE_GATE) return; // wait for real contact
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const pressure = e.pointerType === 'pen' ? e.pressure : 0.5;
     const r = pressureToRadius(pressure, prevR);
     prevR = r;
     const pt = { x, y, r };
     livePts.push(pt);
-    if (isStart) store.begin(pt); else store.extend(pt);
+    if (!strokeStarted) { store.begin(pt); strokeStarted = true; } else { store.extend(pt); }
     ctx.fillStyle = INK;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  function endStroke(e, cancelled) {
+    if (!penDown || e.pointerId !== activePointerId) return;
+    penDown = false;
+    try { canvas.releasePointerCapture(activePointerId); } catch (_) { /* not captured */ }
+    activePointerId = null;
+    if (cancelled) {
+      if (strokeStarted) repaint(); // drop the partial in-flight stroke's pixels
+    } else if (strokeStarted) {
+      if (isEraserStroke(livePts)) {
+        for (const p of livePts) store.erase(p.x, p.y, 22);
+        repaint();
+      } else {
+        store.end();
+      }
+    }
+    livePts = [];
+    strokeStarted = false;
+    timer.penUp();
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (penDown) return; // ignore secondary/concurrent pointers (palm, 2nd finger)
+    penDown = true;
+    activePointerId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* capture unsupported */ }
+    prevR = null;
+    livePts = [];
+    strokeStarted = false;
+    timer.penDown();
+    feed(e); // may no-op if the first pen sample is below the pressure gate
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!penDown || e.pointerId !== activePointerId) return;
+    feed(e);
+    timer.activity();
+  });
+  canvas.addEventListener('pointerup', (e) => endStroke(e, false));
+  canvas.addEventListener('pointercancel', (e) => endStroke(e, true));
 
   repaint();
   return { store };
