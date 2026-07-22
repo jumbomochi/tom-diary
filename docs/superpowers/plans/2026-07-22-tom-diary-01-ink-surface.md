@@ -826,13 +826,21 @@ describe('looksLikeExclamation', () => {
     const short = { points: Array.from({ length: 20 }, (_, i) => ({ x: 500, y: 200 + i * (150 / 19) })) };
     expect(looksLikeExclamation([short], H)).toBe(false);
   });
-  it('rejects a horizontal stroke', () => {
-    const horiz = { points: Array.from({ length: 20 }, (_, i) => ({ x: 200 + i * 15, y: 500 })) };
-    expect(looksLikeExclamation([horiz], H)).toBe(false);
+  it('rejects a wide, non-vertical stroke (fails the aspect gate)', () => {
+    // Tall enough (h=260 >= 20% of H) but too wide (w=400 > 0.35*h), so it is
+    // rejected by the near-vertical aspect gate, not the height gate.
+    const wide = { points: Array.from({ length: 20 }, (_, i) => ({ x: 200 + i * (400 / 19), y: 200 + i * (260 / 19) })) };
+    expect(looksLikeExclamation([wide], H)).toBe(false);
   });
-  it('rejects a curved arc (a "?"-like shape)', () => {
-    const arc = { points: Array.from({ length: 20 }, (_, i) => ({ x: 500 + Math.sin(i / 3) * 120, y: 200 + i * (250 / 19) })) };
-    expect(looksLikeExclamation([arc], H)).toBe(false);
+  it('rejects an asymmetric hooked bar (fails the straightness gate)', () => {
+    // 15 points straight at x=500, then a 5-point hook out to x=565: width 65
+    // passes the aspect gate (65 <= 0.35*250), but the max deviation from mean-x
+    // (~55) exceeds 0.20*250=50, so only the straightness gate can reject it.
+    const hooked = { points: [
+      ...Array.from({ length: 15 }, (_, i) => ({ x: 500, y: 200 + i * (250 / 19) })),
+      ...Array.from({ length: 5 }, (_, i) => ({ x: 500 + (i + 1) * 13, y: 200 + (15 + i) * (250 / 19) })),
+    ] };
+    expect(looksLikeExclamation([hooked], H)).toBe(false);
   });
   it('rejects 3+ strokes', () => {
     expect(looksLikeExclamation([bar, dot, dot], H)).toBe(false);
@@ -869,6 +877,7 @@ export function looksLikeExclamation(strokes, canvasHeight, {
   maxAspect = 0.35,       // main stroke width / height
   maxStraightDev = 0.20,  // horizontal wander / height
   maxDotFrac = 0.25,      // dot size / main height
+  dotXTolFrac = 0.04,     // dot x-center slack, as a fraction of canvas height (canvas-relative, never abs px)
 } = {}) {
   if (strokes.length < 1 || strokes.length > 2) return false;
   const main = strokes.reduce((a, b) => (b.points.length > a.points.length ? b : a));
@@ -884,7 +893,7 @@ export function looksLikeExclamation(strokes, canvasHeight, {
     const d = bounds(dot.points);
     if (Math.max(d.w, d.h) > maxDotFrac * m.h) return false;  // small
     if (d.cy < m.y1) return false;                            // below the bar
-    if (Math.abs(d.cx - mx) > 0.5 * m.w + 40) return false;   // roughly under center
+    if (Math.abs(d.cx - mx) > 0.5 * m.w + dotXTolFrac * canvasHeight) return false; // roughly under center (canvas-relative)
   }
   return true;
 }
