@@ -12,3 +12,27 @@ export function pressureToRadius(pressure, prevR = null) {
   if (prevR != null) r = Math.min(r, prevR + 1);
   return r;
 }
+
+/**
+ * Classify a stroke as a scribble-erase gesture: many horizontal direction
+ * reversals packed into a short path. tom-diary original (riddle used a
+ * hardware eraser).
+ */
+export function isEraserStroke(points, { minReversals = 4, minReversalsPerPx = 0.02 } = {}) {
+  if (points.length < 4) return false;
+  let pathLen = 0;
+  let reversals = 0;
+  let prevDir = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i - 1].x;
+    const dy = points[i].y - points[i - 1].y;
+    pathLen += Math.hypot(dx, dy);
+    const dir = Math.sign(dx);
+    if (dir !== 0) {
+      if (prevDir !== 0 && dir !== prevDir) reversals++;
+      prevDir = dir;
+    }
+  }
+  if (pathLen === 0) return false;
+  return reversals >= minReversals && reversals / pathLen >= minReversalsPerPx;
+}
