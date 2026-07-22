@@ -21,6 +21,7 @@ export function turnText(catalogLines) {
 
 const SHOW_OPEN = '⟦';  // ⟦
 const SHOW_CLOSE = '⟧'; // ⟧
+const SENTINEL = '⁂';   // ⁂
 
 const utf8 = new TextEncoder();
 const byteLen = (s) => utf8.encode(s).length;
@@ -79,4 +80,85 @@ export function stripDirectives(s) {
   }
   out += rest;
   return out.split(/\s+/).filter(Boolean).join(' ');
+}
+
+/** Parse the ⟦…⟧ inner text into a 1-based catalog number, or null. (oracle.rs:111-116) */
+function parseShowN(inner) {
+  const low = inner.toLowerCase();
+  if (!low.startsWith('show')) return null;
+  let r = low.slice(4).replace(/^[: ]+/, '').trim(); // strip "show", then ':'/' ', then trim
+  if (!/^\d+$/.test(r)) return null;
+  return parseInt(r, 10);
+}
+
+/**
+ * Incremental parser over the model's streamed text. Fed the RUNNING full text
+ * each call; emits each event once. Ported from oracle.rs StreamParser (59-170).
+ */
+export function createStreamParser(catalogIds) {
+  let delivered = 0;
+  let sentinel = null; // index of ⁂, or null (not yet seen)
+  let routeChecked = false;
+  let emittedAny = false;
+
+  return {
+    advance(full, done) {
+      const out = [];
+      if (sentinel === null) {
+        const idx = full.indexOf(SENTINEL);
+        if (idx !== -1) sentinel = idx;
+      }
+      const effective = sentinel === null ? full.length : sentinel;
+
+      // Route: honor ⟦show:N⟧ only when it LEADS the reply.
+      if (!routeChecked) {
+        const lead = full.slice(delivered, effective).replace(/^\s+/, '');
+        if (lead.startsWith(SHOW_OPEN)) {
+          const closeRel = lead.indexOf(SHOW_CLOSE);
+          if (closeRel === -1) {
+            if (!done) return out; // directive still streaming in
+            out.push({ type: 'error', value: 'unfinished conjuring directive' });
+            return out;
+          }
+          const inner = lead.slice(SHOW_OPEN.length, closeRel);
+          const n = parseShowN(inner);
+          routeChecked = true;
+          emittedAny = true;
+          delivered = effective; // consume the whole body
+          const id = (n !== null && n >= 1 && n <= catalogIds.length) ? catalogIds[n - 1] : null;
+          if (id != null) out.push({ type: 'show', value: id });
+          else out.push({ type: 'error', value: `the diary lost that page (${inner})` });
+        } else if (lead === '') {
+          if (!done) return out; // only whitespace so far — keep waiting
+          routeChecked = true;
+        } else {
+          routeChecked = true; // real prose leads: a normal reply
+        }
+      }
+
+      // Prose sentences, never crossing into the ⁂ postscript.
+      if (delivered < effective) {
+        const cut = sentenceCut(full.slice(0, effective), delivered);
+        if (cut !== null) {
+          const chunk = stripDirectives(clean(full.slice(delivered, cut)));
+          if (chunk !== '') { emittedAny = true; out.push({ type: 'ink', value: chunk }); }
+          delivered = cut;
+        }
+      }
+
+      if (done) {
+        if (delivered < effective) {
+          const rest = stripDirectives(clean(full.slice(delivered, effective).trim()));
+          if (rest !== '') { emittedAny = true; out.push({ type: 'ink', value: rest }); }
+          delivered = effective;
+        }
+        if (sentinel !== null) {
+          const t = full.slice(sentinel + SENTINEL.length).trim();
+          if (t !== '') out.push({ type: 'transcript', value: t });
+        }
+        if (!emittedAny) out.push({ type: 'error', value: 'empty reply' });
+      }
+      return out;
+    },
+  };
 }
