@@ -22,3 +22,15 @@ export function wrapLines(text, maxW, measure) {
   }
   return lines;
 }
+
+/**
+ * Deterministic per-line wobble: a u32 LCG seeded 0x1234, advanced once per
+ * line, mapped to an integer y-shift in [-3, 3]. (main.rs:869-873)
+ */
+export function makeWobble(seed = 0x1234) {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return ((s >>> 16) % 7) - 3;
+  };
+}
