@@ -130,7 +130,7 @@ import { test, expect } from '@playwright/test';
 
 test('DancingScript parses via vendored opentype and exposes metrics', async ({ page }) => {
   await page.goto('/tests/browser/fixtures/font-harness.html');
-  await page.waitForSelector('body[data-ready="true"]');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
   const f = await page.evaluate(() => window.__font);
   expect(f.unitsPerEm).toBeGreaterThan(0);
   expect(f.advance).toBeGreaterThan(0);
@@ -542,7 +542,7 @@ import { test, expect } from '@playwright/test';
 
 test('glyph cache rasterizes, thins, and traces real glyphs into polylines', async ({ page }) => {
   await page.goto('/tests/browser/fixtures/glyphs-harness.html');
-  await page.waitForSelector('body[data-ready="true"]');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
   const g = await page.evaluate(() => window.__glyphs);
   expect(g.lineHeight).toBe(120);
   expect(g.measure).toBeGreaterThan(0);
@@ -1062,7 +1062,7 @@ import { test, expect } from '@playwright/test';
 
 test('reveal animator draws black ink and fires onDone', async ({ page }) => {
   await page.goto('/tests/browser/fixtures/reveal-harness.html');
-  await page.waitForSelector('body[data-ready="true"]');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
   const r = await page.evaluate(() => window.__reveal);
   expect(r.done).toBe(true);
   // Midpoint pixel should be near-black (reply ink), not cream.
@@ -1248,7 +1248,7 @@ import { test, expect } from '@playwright/test';
 
 test('runDissolve clears all ink to paper over its stages', async ({ page }) => {
   await page.goto('/tests/browser/fixtures/dissolve-harness.html');
-  await page.waitForSelector('body[data-ready="true"]');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
   const before = await page.evaluate(() => window.__before);
   const after = await page.evaluate(() => window.__after);
   expect(before).toBeGreaterThan(5000); // ~80x80 filled
@@ -1382,7 +1382,7 @@ import { test, expect } from '@playwright/test';
 
 test('createReplyWriter writes a reply as black ink and reports its plan', async ({ page }) => {
   await page.goto('/tests/browser/fixtures/handwriting-harness.html');
-  await page.waitForSelector('body[data-ready="true"]', { timeout: 15000 });
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', { timeout: 15000 });
   const hw = await page.evaluate(() => window.__hw);
   expect(hw.totalPoints).toBeGreaterThan(100);
   expect(hw.ink).toBeGreaterThan(200);          // real ink landed on the page
