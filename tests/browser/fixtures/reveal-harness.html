@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>reveal harness</title>
+<style>html,body{margin:0}#page{display:block;width:400px;height:200px;background:#f4ecd8}</style>
+</head>
+<body>
+<canvas id="page" width="400" height="200"></canvas>
+<script type="module">
+  import { createRevealAnimator } from '../../../js/reveal.js';
+  const ctx = document.getElementById('page').getContext('2d');
+  ctx.fillStyle = '#f4ecd8'; ctx.fillRect(0, 0, 400, 200);
+  // A diagonal stroke of 40 points.
+  const stroke = Array.from({ length: 40 }, (_, i) => [10 + i * 5, 20 + i * 4]);
+  const anim = createRevealAnimator(ctx, {
+    pointsPerTick: 26, tickMs: 5, radius: 2, color: '#000000',
+    onDone: () => {
+      const px = ctx.getImageData(110, 100, 1, 1).data; // stroke midpoint (i=20 of 40: x=10+5*20, y=20+4*20)
+      window.__reveal = { done: true, r: px[0], g: px[1], b: px[2] };
+      document.body.dataset.ready = 'true';
+    },
+  });
+  anim.setPlan([stroke]);
+  anim.start();
+</script>
+</body></html>
