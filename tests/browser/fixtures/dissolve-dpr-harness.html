@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>dissolve dpr harness</title>
+<style>html,body{margin:0}#page{display:block;width:120px;height:120px}</style>
+</head>
+<body>
+<canvas id="page" width="240" height="240"></canvas>
+<script type="module">
+  import { runDissolve, FADE_STAGES, FADE_STEP_MS } from '../../../js/dissolve.js';
+  // 240x240 backing store representing 120 CSS px at dpr 2.
+  const ctx = document.getElementById('page').getContext('2d');
+  ctx.setTransform(2, 0, 0, 2, 0, 0);
+  ctx.fillStyle = '#f4ecd8'; ctx.fillRect(0, 0, 120, 120);          // cream, CSS coords
+  ctx.fillStyle = '#000000'; ctx.fillRect(20, 20, 80, 80);          // black block, CSS coords
+  const region = { x0: 20, y0: 20, x1: 99, y1: 99 };                // CSS px
+  // Count ink over the DEVICE-pixel area of that block (CSS 20..99 * 2 = 40..199).
+  const inkPixels = () => {
+    const d = ctx.getImageData(40, 40, 160, 160).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (luma < 200) n++;
+    }
+    return n;
+  };
+  const before = inkPixels();
+  runDissolve(ctx, region, {
+    stages: FADE_STAGES, stepMs: FADE_STEP_MS,
+    onDone: () => {
+      window.__dpr = { before, after: inkPixels() };
+      document.body.dataset.ready = 'true';
+    },
+  });
+</script>
+</body></html>

@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>font harness</title></head>
+<body>
+<script type="module">
+  import * as opentype from '../../../vendor/opentype.mjs';
+  (async () => {
+    try {
+      const buf = await fetch('../../../fonts/DancingScript.ttf').then(r => r.arrayBuffer());
+      const font = opentype.parse(buf);
+      const glyph = font.charToGlyph('o');
+      window.__font = {
+        unitsPerEm: font.unitsPerEm,
+        advance: glyph.advanceWidth,
+        ok: !!font.charToGlyph('A'),
+      };
+      document.body.dataset.ready = 'true';
+    } catch (e) {
+      console.error('Font load error:', e);
+      document.body.dataset.error = e.toString();
+    }
+  })();
+</script>
+</body></html>
