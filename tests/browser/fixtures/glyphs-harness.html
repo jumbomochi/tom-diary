@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>glyphs harness</title></head>
+<body>
+<script type="module">
+  import { loadFont, createGlyphCache } from '../../../js/glyphs.js';
+  (async () => {
+    const font = await loadFont('../../../fonts/DancingScript.ttf');
+    const cache = createGlyphCache(font, 96);
+    const l = cache.line('lo');
+    window.__glyphs = {
+      lineHeight: cache.lineHeight,
+      measure: cache.measure('lo'),
+      strokeCount: l.strokes.length,
+      totalPoints: l.strokes.reduce((n, s) => n + s.length, 0),
+      width: l.width,
+      cachedSameRef: cache.line('lo').strokes.length === l.strokes.length,
+    };
+    document.body.dataset.ready = 'true';
+  })();
+</script>
+</body></html>
