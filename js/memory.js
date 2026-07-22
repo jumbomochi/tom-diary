@@ -49,7 +49,7 @@ function civil(secs) {
   const yoe = divEuclid(doe - divEuclid(doe, 1460) + divEuclid(doe, 36524) - divEuclid(doe, 146096), 365);
   const doy = doe - (365 * yoe + divEuclid(yoe, 4) - divEuclid(yoe, 100));
   const mp = divEuclid(5 * doy + 2, 153);
-  const d = doy - divEuclid(153 * mp + 2, 5);
+  const d = doy - divEuclid(153 * mp + 2, 5) + 1;
   const m = mp < 10 ? mp + 3 : mp - 9;
   return { d, mo: m, h: hour };
 }
