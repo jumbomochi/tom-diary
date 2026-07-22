@@ -37,3 +37,52 @@ export function looksLikeExclamation(strokes, canvasHeight, {
   }
   return true;
 }
+
+// Web-adapted guide text (riddle's windowed variant, minus reMarkable-only lines).
+export const HELP_LINES = [
+  'The Diary',
+  '',
+  'Write, then rest your quill:',
+  'the diary drinks your ink and Tom replies.',
+  '',
+  'The diary remembers. Ask it:',
+  '"show me what I wrote about..."',
+  'and the page will rise again.',
+  '',
+  'Scribble back and forth to erase.',
+  '',
+  'A large ! summons this guide.',
+  '',
+  'Touch pen to page to close.',
+];
+
+export function showHelpPanel(root, { onDismiss, autoDismissMs = 45000 } = {}) {
+  const panel = document.createElement('div');
+  panel.className = 'help-panel';
+  for (const line of HELP_LINES) {
+    const el = document.createElement('div');
+    el.className = 'help-line';
+    el.textContent = line;
+    panel.appendChild(el);
+  }
+  root.appendChild(panel);
+
+  let done = false;
+  let timer = null;
+  const dismiss = () => {
+    if (done) return;
+    done = true;
+    if (timer) clearTimeout(timer);
+    panel.removeEventListener('pointerdown', dismiss);
+    panel.remove();
+    if (onDismiss) onDismiss();
+  };
+  panel.addEventListener('pointerdown', dismiss);
+  timer = setTimeout(dismiss, autoDismissMs);
+  return dismiss;
+}
+
+export function dismissHelpPanel(root) {
+  const panel = root.querySelector('.help-panel');
+  if (panel) panel.dispatchEvent(new PointerEvent('pointerdown'));
+}

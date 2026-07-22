@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8" />
+<body>
+<script type="module">
+  import { showHelpPanel, HELP_LINES } from '/js/help.js';
+  window.__lines = HELP_LINES;
+  window.__dismissed = 0;
+  showHelpPanel(document.body, { onDismiss: () => { window.__dismissed++; } });
+  document.body.dataset.ready = '1';
+</script>
+</body>
