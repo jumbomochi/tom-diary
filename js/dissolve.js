@@ -24,30 +24,39 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Dissolve the ink in `region` back to `paper` over `stages`. Browser-only. */
+/**
+ * Dissolve the ink in `region` back to `paper` over `stages`. Browser-only.
+ * `region` is in CSS pixels (as the rest of the pipeline uses); this maps it
+ * through the context transform to device pixels internally, because
+ * getImageData/putImageData always operate in device pixels and ignore the 2D
+ * transform (so on a DPR-scaled canvas the CSS region must be scaled up).
+ */
 export function runDissolve(ctx, region, {
   stages, stepMs, paper = '#f4ecd8', inkThreshold = 200, onDone,
 } = {}) {
   const [pr, pg, pb] = hexToRgb(paper);
-  const x0 = region.x0, y0 = region.y0;
-  const w = region.x1 - region.x0 + 1;
-  const h = region.y1 - region.y0 + 1;
+  const t = ctx.getTransform();
+  const sx = t.a || 1, sy = t.d || 1; // device pixels per CSS pixel
+  const dx0 = Math.max(0, Math.round(region.x0 * sx));
+  const dy0 = Math.max(0, Math.round(region.y0 * sy));
+  const w = Math.round((region.x1 - region.x0 + 1) * sx);
+  const h = Math.round((region.y1 - region.y0 + 1) * sy);
   let stage = 0;
   let handle = null;
 
   const pass = () => {
-    const img = ctx.getImageData(x0, y0, w, h);
+    const img = ctx.getImageData(dx0, dy0, w, h);
     const d = img.data;
     for (let yy = 0; yy < h; yy++) {
       for (let xx = 0; xx < w; xx++) {
         const o = (yy * w + xx) * 4;
         const luma = 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2];
-        if (luma < inkThreshold && shouldClear(x0 + xx, y0 + yy, stage, stages)) {
+        if (luma < inkThreshold && shouldClear(dx0 + xx, dy0 + yy, stage, stages)) {
           d[o] = pr; d[o + 1] = pg; d[o + 2] = pb; d[o + 3] = 255;
         }
       }
     }
-    ctx.putImageData(img, x0, y0);
+    ctx.putImageData(img, dx0, dy0);
     stage++;
     if (stage >= stages) { handle = null; if (onDone) onDone(); }
     else handle = setTimeout(pass, stepMs);
