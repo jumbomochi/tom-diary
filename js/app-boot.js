@@ -1,7 +1,19 @@
-// Temporary boot stub for Plan 1; replaced by app.js in Plan 4.
+import { initInk } from './ink.js';
+import { showHelpPanel } from './help.js';
+
 const canvas = document.getElementById('page');
-const dpr = window.devicePixelRatio || 1;
-canvas.width = canvas.clientWidth * dpr;
-canvas.height = canvas.clientHeight * dpr;
-canvas.getContext('2d').scale(dpr, dpr);
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+
+const idle = Number(new URLSearchParams(location.search).get('idle')) || 2800;
+initInk(canvas, {
+  idleMs: idle,
+  onCommit: (uri) => { window.__lastCommit = uri; },
+  onHelp: () => showHelpPanel(document.body, { onDismiss: () => {} }),
+});
 document.body.dataset.ready = 'true';

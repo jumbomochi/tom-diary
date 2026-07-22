@@ -1,5 +1,8 @@
 // Pure geometry + stroke model for the ink surface. No DOM at module scope.
 
+import { createIdleTimer, computeCommitBox, renderCommitPng } from './commit.js';
+import { looksLikeExclamation } from './help.js';
+
 /**
  * Pressure→radius, ported from riddle main.rs:345 (normalized) + ink.rs:41 (growth cap).
  * @param {number} pressure normalized 0..1
@@ -70,4 +73,96 @@ export function createStrokeStore() {
     erase(x, y, r) { strokes = eraseStrokes(strokes, x, y, r); },
     clear() { strokes = []; current = null; },
   };
+}
+
+const PAPER = '#f4ecd8';
+const INK = '#33302a';
+const PRESSURE_GATE = 0.01; // ~ (>40 of 4096) from riddle main.rs:327
+
+export function initInk(canvas, { onCommit, onHelp, idleMs = 2800 } = {}) {
+  const ctx = canvas.getContext('2d');
+  const store = createStrokeStore();
+  let penDown = false;
+  let prevR = null;
+  let livePts = [];
+
+  const cssW = () => canvas.clientWidth;
+  const cssH = () => canvas.clientHeight;
+
+  function repaint() {
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(0, 0, cssW(), cssH());
+    ctx.fillStyle = INK;
+    for (const s of store.strokes) drawStroke(s.points);
+  }
+  function drawStroke(points) {
+    for (const p of points) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r ?? 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  const timer = createIdleTimer(idleMs, onIdle);
+
+  function onIdle() {
+    if (looksLikeExclamation(store.strokes, cssH())) {
+      store.clear();
+      repaint();
+      if (onHelp) onHelp();
+      return;
+    }
+    const box = computeCommitBox(store.strokes, cssW(), cssH());
+    if (!box) return; // empty / fully erased
+    const uri = renderCommitPng(store.strokes, box);
+    const snapshot = store.strokes.map((s) => ({ points: s.points.slice() }));
+    if (onCommit) onCommit(uri, snapshot);
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'pen' && e.pressure < PRESSURE_GATE) return;
+    penDown = true;
+    prevR = null;
+    livePts = [];
+    timer.penDown();
+    addPoint(e, true);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!penDown) return;
+    if (e.pointerType === 'pen' && e.pressure < PRESSURE_GATE) return;
+    addPoint(e, false);
+    timer.activity();
+  });
+  canvas.addEventListener('pointerup', () => {
+    if (!penDown) return;
+    penDown = false;
+    if (isEraserStroke(livePts)) {
+      // discard as ink; erase along the path instead
+      for (const p of livePts) store.erase(p.x, p.y, 22);
+      repaint();
+    } else {
+      store.end();
+    }
+    livePts = [];
+    timer.penUp();
+  });
+
+  function addPoint(e, isStart) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const pressure = e.pointerType === 'pen' ? e.pressure : 0.5;
+    const r = pressureToRadius(pressure, prevR);
+    prevR = r;
+    const pt = { x, y, r };
+    livePts.push(pt);
+    if (isStart) store.begin(pt); else store.extend(pt);
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  repaint();
+  return { store };
 }
