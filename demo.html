@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>handwriting demo</title>
+<link rel="stylesheet" href="css/paper.css">
+<style>#controls{position:fixed;top:8px;left:8px;z-index:5;font-family:Georgia,serif}</style>
+</head>
+<body>
+<div id="controls">
+  <input id="text" size="40" value="Do you know anything about the Chamber of Secrets?">
+  <button id="write">Write</button>
+  <button id="dissolve">Dissolve</button>
+</div>
+<canvas id="page"></canvas>
+<script type="module">
+  import { createReplyWriter, loadFont, runDissolve, FADE_STAGES, FADE_STEP_MS } from './js/handwriting.js';
+  const canvas = document.getElementById('page');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const paint = () => { ctx.fillStyle = '#f4ecd8'; ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight); };
+  paint();
+  const font = await loadFont('fonts/DancingScript.ttf');
+  const writer = createReplyWriter(canvas, font);
+  let last = null;
+  document.getElementById('write').onclick = () => { paint(); last = writer.write(document.getElementById('text').value); };
+  document.getElementById('dissolve').onclick = () => {
+    if (last && last.region) runDissolve(ctx, last.region, { stages: FADE_STAGES, stepMs: FADE_STEP_MS });
+  };
+</script>
+</body></html>
