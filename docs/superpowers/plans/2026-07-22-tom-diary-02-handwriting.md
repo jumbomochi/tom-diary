@@ -1046,7 +1046,7 @@ Create `tests/browser/fixtures/reveal-harness.html`:
   const anim = createRevealAnimator(ctx, {
     pointsPerTick: 26, tickMs: 5, radius: 2, color: '#000000',
     onDone: () => {
-      const px = ctx.getImageData(200, 116, 1, 1).data; // near stroke midpoint
+      const px = ctx.getImageData(110, 100, 1, 1).data; // stroke midpoint (point index 20: x=10+20*5, y=20+20*4)
       window.__reveal = { done: true, r: px[0], g: px[1], b: px[2] };
       document.body.dataset.ready = 'true';
     },
