@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { askOracle } from '../../js/oracle.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { askOracle, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS } from '../../js/oracle.js';
 
 // Build a fake streaming Response from an array of SSE text chunks.
 function sseResponse(chunks, { status = 200 } = {}) {
@@ -86,5 +86,44 @@ describe('askOracle', () => {
     const { handlers, events } = collect();
     await askOracle(config, turn, handlers, { fetch: fetchImpl });
     expect(events).toEqual([['error', 'request failed: offline']]);
+  });
+});
+
+describe('askOracle timeouts', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('waits past the connect timeout for the first byte, then aborts on the read timeout', async () => {
+    vi.useFakeTimers();
+    // A Response whose first read() never resolves on its own; it only settles
+    // (rejects) when the request's abort signal fires. Mirrors fetch semantics
+    // where an aborted body read rejects with an AbortError.
+    const fetchImpl = vi.fn(async (_url, init) => {
+      const signal = init.signal;
+      const body = {
+        getReader() {
+          return {
+            read() {
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () =>
+                  reject(new Error('The operation was aborted')), { once: true });
+              });
+            },
+          };
+        },
+      };
+      return { status: 200, ok: true, body, text: async () => '' };
+    });
+    const { handlers, events } = collect();
+    const done = askOracle(config, turn, handlers, { fetch: fetchImpl });
+
+    // Let the fetch resolve: connect timer cleared, read timer (90s) armed.
+    await vi.advanceTimersByTimeAsync(0);
+    // Past the connect budget but under the read budget: must NOT abort.
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS + 1000);
+    expect(events).toEqual([]);
+    // Now cross the read budget: the pending first-byte wait must abort.
+    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
+    await done;
+    expect(events).toEqual([['error', 'request failed: The operation was aborted']]);
   });
 });

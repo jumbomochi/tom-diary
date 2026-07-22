@@ -225,15 +225,24 @@ export async function askOracle(config, turn, handlers, deps = {}) {
   const messages = buildMessages({ remember, history, catalogLines, imageDataUri });
 
   const controller = new AbortController();
-  let timer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+  let timer = null;
   const arm = (ms) => { clearTimeout(timer); timer = setTimeout(() => controller.abort(), ms); };
 
-  const doRequest = (capField) => fetchImpl(url, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRequestBody({ model, maxTokens, capField, reasoning, messages })),
-    signal: controller.signal,
-  });
+  // Each attempt gets a FRESH connect budget, then flips to the read budget the
+  // moment headers arrive — so the wait for the first SSE byte (a reasoning
+  // model may lead with a long silence) is bounded by READ_TIMEOUT_MS, matching
+  // ureq's per-read timeout including the first read (oracle.rs:465-472).
+  const doRequest = async (capField) => {
+    arm(CONNECT_TIMEOUT_MS);
+    const r = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildRequestBody({ model, maxTokens, capField, reasoning, messages })),
+      signal: controller.signal,
+    });
+    arm(READ_TIMEOUT_MS);
+    return r;
+  };
 
   let resp;
   try {
