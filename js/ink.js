@@ -36,3 +36,38 @@ export function isEraserStroke(points, { minReversals = 4, minReversalsPerPx = 0
   if (pathLen === 0) return false;
   return reversals >= minReversals && reversals / pathLen >= minReversalsPerPx;
 }
+
+export function eraseStrokes(strokes, ex, ey, radius) {
+  const rr = (radius + 2) ** 2;
+  const out = [];
+  for (const stroke of strokes) {
+    let cur = [];
+    for (const p of stroke.points) {
+      const d2 = (p.x - ex) ** 2 + (p.y - ey) ** 2;
+      if (d2 <= rr) {
+        if (cur.length) { out.push({ points: cur }); cur = []; }
+      } else {
+        cur.push(p);
+      }
+    }
+    if (cur.length) out.push({ points: cur });
+  }
+  return out;
+}
+
+export function isPageEmpty(strokes) {
+  return strokes.reduce((n, s) => n + s.points.length, 0) === 0;
+}
+
+export function createStrokeStore() {
+  let strokes = [];
+  let current = null;
+  return {
+    get strokes() { return strokes; },
+    begin(pt) { current = { points: [pt] }; },
+    extend(pt) { if (current) current.points.push(pt); },
+    end() { if (current && current.points.length) strokes.push(current); current = null; },
+    erase(x, y, r) { strokes = eraseStrokes(strokes, x, y, r); },
+    clear() { strokes = []; current = null; },
+  };
+}
