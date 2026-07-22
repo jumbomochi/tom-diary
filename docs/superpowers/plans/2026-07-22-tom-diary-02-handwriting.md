@@ -792,9 +792,10 @@ describe('planReply', () => {
     expect(plan.strokes.length).toBe(2);
     const y0 = plan.strokes[0][0][1];
     const y1 = plan.strokes[1][0][1];
-    // line0 top 360 + wobble 2 = 362; line1 top 480 + wobble -3 = 477.
-    expect(y0).toBe(362);
-    expect(y1).toBe(477);
+    // Two lines -> totalH = 120*2 = 240, so yTop = max(floor((1200-240)/3),60) = 320.
+    // line0 top 320 + wobble 2 = 322; line1 top 440 + wobble -3 = 437.
+    expect(y0).toBe(322);
+    expect(y1).toBe(437);
   });
 
   it('honors yStart for streamed continuation and reports region', () => {
