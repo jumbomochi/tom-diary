@@ -162,3 +162,41 @@ export function createStreamParser(catalogIds) {
     },
   };
 }
+
+/**
+ * The message array: system, then each recent page as a text-only user/assistant
+ * pair, then the current turn (catalog text + the page image). (oracle.rs:447-499)
+ */
+export function buildMessages({ remember, history = [], catalogLines = [], imageDataUri }) {
+  const messages = [{ role: 'system', content: buildSystem(remember) }];
+  for (const [t, r] of history) {
+    messages.push({ role: 'user', content: `(an earlier page) ${t}` });
+    messages.push({ role: 'assistant', content: r });
+  }
+  messages.push({
+    role: 'user',
+    content: [
+      { type: 'text', text: turnText(catalogLines) },
+      { type: 'image_url', image_url: { url: imageDataUri } },
+    ],
+  });
+  return messages;
+}
+
+/** The chat-completions request body. No temperature/top_p. (oracle.rs:480-499) */
+export function buildRequestBody({ model, maxTokens, capField = 'max_tokens', reasoning = null, messages }) {
+  const body = { model, stream: true, [capField]: maxTokens };
+  if (reasoning) body.reasoning_effort = reasoning;
+  body.messages = messages;
+  return body;
+}
+
+/** Pull choices[0].delta.content from one SSE data-line JSON object, or null. */
+export function sseDeltaContent(dataLine) {
+  try {
+    const c = JSON.parse(dataLine)?.choices?.[0]?.delta?.content;
+    return typeof c === 'string' ? c : null;
+  } catch {
+    return null;
+  }
+}
