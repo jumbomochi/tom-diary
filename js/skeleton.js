@@ -39,3 +39,45 @@ export function thinZhangSuen(mask, w, h) {
   }
   return mask;
 }
+
+/**
+ * Trace a 1px skeleton into ordered polylines. Endpoints first, then loops;
+ * greedy 8-neighbor walk; drop paths under minPoints; sort by min x.
+ * Ported from script.rs:128-195.
+ */
+export function traceSkeleton(mask, w, h, minPoints = 3) {
+  const at = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
+  // Neighbor scan order matches the Rust dy(-1..1) outer, dx(-1..1) inner loop.
+  const OFF = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+  const neighbors = (x, y) => {
+    const out = [];
+    for (const [dx, dy] of OFF) if (at(x + dx, y + dy)) out.push([x + dx, y + dy]);
+    return out;
+  };
+
+  const visited = new Uint8Array(w * h);
+  const seen = (x, y) => visited[y * w + x] === 1;
+  const mark = (x, y) => { visited[y * w + x] = 1; };
+
+  const starts = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (at(x, y) && neighbors(x, y).length === 1) starts.push([x, y]);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (at(x, y)) starts.push([x, y]);
+
+  const strokes = [];
+  for (const [sx, sy] of starts) {
+    if (seen(sx, sy)) continue;
+    const path = [[sx, sy]];
+    mark(sx, sy);
+    let cx = sx, cy = sy;
+    for (;;) {
+      const next = neighbors(cx, cy).find(([nx, ny]) => !seen(nx, ny));
+      if (!next) break;
+      mark(next[0], next[1]);
+      path.push(next);
+      cx = next[0]; cy = next[1];
+    }
+    if (path.length >= minPoints) strokes.push(path);
+  }
+  strokes.sort((a, b) => Math.min(...a.map(([x]) => x)) - Math.min(...b.map(([x]) => x)));
+  return strokes;
+}
