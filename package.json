@@ -1,0 +1,17 @@
+{
+  "name": "tom-diary",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:browser": "playwright test",
+    "serve": "python3 -m http.server 8080"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "jsdom": "^25.0.0",
+    "@playwright/test": "^1.48.0"
+  }
+}

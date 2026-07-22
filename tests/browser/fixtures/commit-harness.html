@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8" />
+<body>
+<script type="module">
+  import { computeCommitBox, renderCommitPng } from '/js/commit.js';
+  window.runCommit = (strokes, w, h) => {
+    const box = computeCommitBox(strokes, w, h);
+    return { box, uri: renderCommitPng(strokes, box) };
+  };
+  document.body.dataset.ready = '1';
+</script>
+</body>
