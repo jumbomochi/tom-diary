@@ -17,6 +17,7 @@ export function looksLikeExclamation(strokes, canvasHeight, {
   maxAspect = 0.35,       // main stroke width / height
   maxStraightDev = 0.20,  // horizontal wander / height
   maxDotFrac = 0.25,      // dot size / main height
+  dotXTolFrac = 0.04,     // dot x-center slack, as a fraction of canvas height (canvas-relative, never abs px)
 } = {}) {
   if (strokes.length < 1 || strokes.length > 2) return false;
   const main = strokes.reduce((a, b) => (b.points.length > a.points.length ? b : a));
@@ -32,7 +33,7 @@ export function looksLikeExclamation(strokes, canvasHeight, {
     const d = bounds(dot.points);
     if (Math.max(d.w, d.h) > maxDotFrac * m.h) return false;  // small
     if (d.cy < m.y1) return false;                            // below the bar
-    if (Math.abs(d.cx - mx) > 0.5 * m.w + 40) return false;   // roughly under center
+    if (Math.abs(d.cx - mx) > 0.5 * m.w + dotXTolFrac * canvasHeight) return false; // roughly under center (canvas-relative)
   }
   return true;
 }
