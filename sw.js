@@ -16,7 +16,7 @@ self.addEventListener('install', (e) => {
   // the rest of the shell.
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => Promise.all(SHELL.map((url) => c.add(url).catch(() => {}))))
+      .then((c) => Promise.all(SHELL.map((url) => c.add(url).catch((err) => console.warn('sw: precache failed', url, err)))))
       .then(() => self.skipWaiting()),
   );
 });
