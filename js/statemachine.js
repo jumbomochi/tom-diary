@@ -190,3 +190,51 @@ export function reduce(state, ev) {
       return R(state);
   }
 }
+
+/** Stored [x,y,r] triples -> [x,y] polylines for the reveal animator. */
+export function triplesToPolylines(strokes) {
+  return strokes.map((s) => s.map(([x, y]) => [x, y]));
+}
+
+/**
+ * Build the conjured page's combined stroke plan: date heading (centered at
+ * headY), the writer's own strokes, then the old reply below. Ported from
+ * conjure() (main.rs:795-857). Providers are injected so this stays pure.
+ */
+export function planConjure(headProvider, replyProvider, entry, { screenW, screenH, headY = 64 }) {
+  const strokes = [];
+  let x0b = Infinity, y0b = Infinity, x1b = -Infinity, y1b = -Infinity;
+  const grow = (x, y) => {
+    x0b = Math.min(x0b, x - 5); y0b = Math.min(y0b, y - 5);
+    x1b = Math.max(x1b, x + 5); y1b = Math.max(y1b, y + 5);
+  };
+  let inkBottom = headY;
+
+  // Heading: centered horizontally at headY.
+  const head = headProvider.line(entry.dateText);
+  const headX = Math.round((screenW - head.width) / 2);
+  for (const s of head.strokes) {
+    const mapped = s.map(([sx, sy]) => [headX + sx, headY + sy]);
+    for (const [x, y] of mapped) { grow(x, y); inkBottom = Math.max(inkBottom, y); }
+    strokes.push(mapped);
+  }
+
+  // The writer's own hand, exactly as penned.
+  for (const s of triplesToPolylines(entry.strokes)) {
+    for (const [x, y] of s) { grow(x, y); inkBottom = Math.max(inkBottom, y); }
+    strokes.push(s);
+  }
+
+  // Tom's old reply, below.
+  if (entry.reply && entry.reply.trim() !== '') {
+    const yStart = Math.min(inkBottom + 130, screenH - 400);
+    const plan = planReply(entry.reply, replyProvider, { screenW, screenH, yStart });
+    for (const s of plan.strokes) {
+      for (const [x, y] of s) grow(x, y);
+      strokes.push(s);
+    }
+  }
+
+  const region = strokes.length ? { x0: x0b, y0: y0b, x1: x1b, y1: y1b } : null;
+  return { strokes, region };
+}
