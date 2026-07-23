@@ -24,3 +24,146 @@ export function oracleExcuse(e) {
   }
   return 'The ink blurred before it could answer. Write again.';
 }
+
+export function initialState() {
+  return { name: 'listening' };
+}
+
+const R = (state, effects = []) => ({ state, effects });
+
+/** Enter replying with an initial batch of chunks (first uses write, rest append). */
+function enterReplying({ id, transcript = '', chunks, failed = false, ended = false, extra = [] }) {
+  const reply = chunks.join(' ').trim();
+  const effects = [...extra, { type: 'write', text: chunks[0] }];
+  for (const t of chunks.slice(1)) effects.push({ type: 'append', text: t });
+  return R(
+    { name: 'replying', id, transcript, reply, totalPoints: 0, drained: false, ended, failed },
+    effects,
+  );
+}
+
+/** Ink a friendly excuse as the reply; never persisted. */
+function enterExcuse(id, rawError, extra = []) {
+  const text = oracleExcuse(rawError);
+  return R(
+    { name: 'replying', id, transcript: '', reply: text, totalPoints: 0, drained: false, ended: true, failed: true },
+    [...extra, { type: 'write', text }],
+  );
+}
+
+/** After the drink, act on whatever the oracle buffered (or start thinking). */
+function afterDrink(s) {
+  if (s.show != null) return R({ name: 'conjuring' }, [{ type: 'conjure', id: s.show }]);
+  if (s.error != null) return enterExcuse(s.id, s.error);
+  if (s.chunks.length > 0) {
+    return enterReplying({ id: s.id, transcript: s.transcript || '', chunks: s.chunks, ended: s.ended });
+  }
+  return R(
+    { name: 'thinking', id: s.id, transcript: s.transcript || '' },
+    [{ type: 'blot', on: true }, { type: 'schedule', name: 'patience', ms: 120000 }],
+  );
+}
+
+/** Complete the turn: persist when eligible, then linger. */
+function toLingering(s) {
+  const effects = [];
+  if (!s.failed && s.reply !== '') {
+    effects.push({ type: 'persist', id: s.id, transcript: s.transcript || '', reply: s.reply });
+  }
+  effects.push({ type: 'schedule', name: 'linger', ms: lingerMs(s.totalPoints) });
+  return R({ name: 'lingering', region: s.region || null }, effects);
+}
+
+export function reduce(state, ev) {
+  switch (state.name) {
+    case 'listening':
+      if (ev.type === 'commit') {
+        return R(
+          {
+            name: 'drinking', id: ev.id, region: ev.region,
+            chunks: [], show: null, error: null, transcript: null, ended: false,
+          },
+          [{ type: 'clearInk' }, { type: 'startOracle', uri: ev.uri }, { type: 'dissolve', region: ev.region, kind: 'drink' }],
+        );
+      }
+      if (ev.type === 'help') return R({ name: 'help' }, [{ type: 'openHelp' }]);
+      return R(state);
+
+    case 'drinking':
+      if (ev.type === 'oracleInk') return R({ ...state, chunks: [...state.chunks, ev.text] });
+      if (ev.type === 'oracleShow') return R({ ...state, show: ev.id });
+      if (ev.type === 'oracleTranscript') return R({ ...state, transcript: ev.text });
+      if (ev.type === 'oracleError') return R({ ...state, error: ev.text });
+      if (ev.type === 'oracleEnd') return R({ ...state, ended: true });
+      if (ev.type === 'drinkDone') return afterDrink(state);
+      return R(state);
+
+    case 'thinking':
+      if (ev.type === 'oracleShow') {
+        return R({ name: 'conjuring' }, [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }, { type: 'conjure', id: ev.id }]);
+      }
+      if (ev.type === 'oracleInk') {
+        return enterReplying({
+          id: state.id, transcript: state.transcript, chunks: [ev.text],
+          extra: [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }],
+        });
+      }
+      if (ev.type === 'oracleTranscript') return R({ ...state, transcript: ev.text });
+      if (ev.type === 'oracleError') {
+        return enterExcuse(state.id, ev.text, [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }]);
+      }
+      if (ev.type === 'timer' && ev.name === 'patience') {
+        return enterExcuse(state.id, 'timed out', [{ type: 'blot', on: false }]);
+      }
+      return R(state);
+
+    case 'replying': {
+      if (ev.type === 'oracleInk') {
+        return R({ ...state, reply: (state.reply + ' ' + ev.text).trim() }, [{ type: 'append', text: ev.text }]);
+      }
+      if (ev.type === 'oracleTranscript') return R({ ...state, transcript: ev.text });
+      if (ev.type === 'revealPlanned') return R({ ...state, totalPoints: state.totalPoints + ev.totalPoints });
+      if (ev.type === 'oracleError') return R({ ...state, ended: true, failed: true });
+      if (ev.type === 'oracleEnd') {
+        const next = { ...state, ended: true };
+        return next.drained ? toLingering(next) : R(next);
+      }
+      if (ev.type === 'revealDrained') {
+        const next = { ...state, drained: true };
+        return next.ended ? toLingering(next) : R(next);
+      }
+      return R(state);
+    }
+
+    case 'lingering':
+      if (ev.type === 'timer' && ev.name === 'linger') {
+        return R({ name: 'fading', region: state.region }, [{ type: 'dissolve', region: state.region, kind: 'fade' }]);
+      }
+      if (ev.type === 'penTap') {
+        return R({ name: 'fading', region: state.region }, [{ type: 'cancelTimer', name: 'linger' }, { type: 'dissolve', region: state.region, kind: 'fade' }]);
+      }
+      return R(state);
+
+    case 'fading':
+      if (ev.type === 'fadeDone') return R({ name: 'listening' }, [{ type: 'clearScreen' }]);
+      return R(state);
+
+    case 'help':
+      if (ev.type === 'helpDismissed') return R({ name: 'listening' });
+      return R(state);
+
+    case 'conjuring':
+      if (ev.type === 'conjureDrained') return R({ name: 'memory' }, [{ type: 'schedule', name: 'memory', ms: 120000 }]);
+      if (ev.type === 'penTap') return R({ name: 'listening' }, [{ type: 'restoreCanvas' }]);
+      return R(state);
+
+    case 'memory':
+      if (ev.type === 'penTap' || (ev.type === 'timer' && ev.name === 'memory')) {
+        return R({ name: 'listening' }, [{ type: 'restoreCanvas' }]);
+      }
+      return R(state);
+
+    default:
+      return R(state);
+  }
+}
