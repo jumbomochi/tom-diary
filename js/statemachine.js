@@ -31,13 +31,23 @@ export function initialState() {
 
 const R = (state, effects = []) => ({ state, effects });
 
+/** Bounding-box union of two ink regions; either may be null. Pure. */
+export function unionRegion(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0),
+    x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1),
+  };
+}
+
 /** Enter replying with an initial batch of chunks (first uses write, rest append). */
 function enterReplying({ id, transcript = '', chunks, failed = false, ended = false, extra = [] }) {
   const reply = chunks.join(' ').trim();
   const effects = [...extra, { type: 'write', text: chunks[0] }];
   for (const t of chunks.slice(1)) effects.push({ type: 'append', text: t });
   return R(
-    { name: 'replying', id, transcript, reply, totalPoints: 0, drained: false, ended, failed },
+    { name: 'replying', id, transcript, reply, totalPoints: 0, region: null, drained: false, ended, failed },
     effects,
   );
 }
@@ -46,7 +56,7 @@ function enterReplying({ id, transcript = '', chunks, failed = false, ended = fa
 function enterExcuse(id, rawError, extra = []) {
   const text = oracleExcuse(rawError);
   return R(
-    { name: 'replying', id, transcript: '', reply: text, totalPoints: 0, drained: false, ended: true, failed: true },
+    { name: 'replying', id, transcript: '', reply: text, totalPoints: 0, region: null, drained: false, ended: true, failed: true },
     [...extra, { type: 'write', text }],
   );
 }
@@ -54,10 +64,17 @@ function enterExcuse(id, rawError, extra = []) {
 /** After the drink, act on whatever the oracle buffered (or start thinking). */
 function afterDrink(s) {
   if (s.show != null) return R({ name: 'conjuring' }, [{ type: 'conjure', id: s.show }]);
-  if (s.error != null) return enterExcuse(s.id, s.error);
   if (s.chunks.length > 0) {
-    return enterReplying({ id: s.id, transcript: s.transcript || '', chunks: s.chunks, ended: s.ended });
+    // Keep the real ink even if an error co-arrived: mark the turn failed (which
+    // suppresses the memory persist) but do not replace the reply with an excuse.
+    // Ported from riddle main.rs:577-581 (keep-ink + turn_failed).
+    return enterReplying({
+      id: s.id, transcript: s.transcript || '', chunks: s.chunks,
+      // A buffered error terminates the oracle stream, so the turn has ended.
+      ended: s.ended || s.error != null, failed: s.error != null,
+    });
   }
+  if (s.error != null) return enterExcuse(s.id, s.error);
   return R(
     { name: 'thinking', id: s.id, transcript: s.transcript || '' },
     [{ type: 'blot', on: true }, { type: 'schedule', name: 'patience', ms: 120000 }],
@@ -122,7 +139,13 @@ export function reduce(state, ev) {
         return R({ ...state, reply: (state.reply + ' ' + ev.text).trim() }, [{ type: 'append', text: ev.text }]);
       }
       if (ev.type === 'oracleTranscript') return R({ ...state, transcript: ev.text });
-      if (ev.type === 'revealPlanned') return R({ ...state, totalPoints: state.totalPoints + ev.totalPoints });
+      if (ev.type === 'revealPlanned') {
+        return R({
+          ...state,
+          totalPoints: state.totalPoints + ev.totalPoints,
+          region: unionRegion(state.region, ev.region),
+        });
+      }
       if (ev.type === 'oracleError') return R({ ...state, ended: true, failed: true });
       if (ev.type === 'oracleEnd') {
         const next = { ...state, ended: true };

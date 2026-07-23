@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initialState, reduce } from '../../js/statemachine.js';
+import { initialState, reduce, unionRegion } from '../../js/statemachine.js';
 
 // Drive a sequence of events, returning the final {state, effects-of-last-step}.
 function run(events, start = initialState()) {
@@ -10,6 +10,8 @@ function run(events, start = initialState()) {
 }
 const types = (effects) => effects.map((e) => e.type);
 const region = { x0: 10, y0: 10, x1: 100, y1: 100 };
+const regionA = { x0: 20, y0: 30, x1: 120, y1: 60 };
+const regionB = { x0: 15, y0: 50, x1: 140, y1: 90 };
 const commit = { type: 'commit', uri: 'data:image/png;base64,AAA', region, id: 1751856000 };
 
 describe('reduce — commit starts the drink and the oracle concurrently', () => {
@@ -85,10 +87,10 @@ describe('reduce — replying → lingering (persist) → fading → listening',
     let r = reduce(initialState(), commit);
     r = reduce(r.state, { type: 'drinkDone' });        // -> thinking
     r = reduce(r.state, { type: 'oracleInk', text: 'Hello.' }); // -> replying, write
-    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 80 });
+    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 80, region: regionA });
     r = reduce(r.state, { type: 'oracleInk', text: 'Who writes?' }); // append
     expect(r.effects).toContainEqual({ type: 'append', text: 'Who writes?' });
-    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 120 });
+    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 120, region: regionB });
     // reveal drains before the stream ends: stay replying
     r = reduce(r.state, { type: 'revealDrained' });
     expect(r.state.name).toBe('replying');
@@ -122,6 +124,39 @@ describe('reduce — replying → lingering (persist) → fading → listening',
     expect(r.effects).toContainEqual({ type: 'cancelTimer', name: 'linger' });
     expect(r.effects).toContainEqual({ type: 'dissolve', region, kind: 'fade' });
   });
+  it('threads the reply region (unioned across reveals) all the way to the fade dissolve', () => {
+    // Full path: commit -> drinking (with buffered chunk) -> replying ->
+    // revealPlanned(A) -> append + revealPlanned(B) -> oracleEnd + revealDrained
+    // -> lingering -> (timer linger) -> fading. The fade must erase the whole reply.
+    let r = reduce(initialState(), commit);
+    r = reduce(r.state, { type: 'oracleInk', text: 'Hello.' });
+    r = reduce(r.state, { type: 'drinkDone' });                     // -> replying
+    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 80, region: regionA });
+    r = reduce(r.state, { type: 'oracleInk', text: 'Who writes?' });
+    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 120, region: regionB });
+    r = reduce(r.state, { type: 'oracleEnd' });
+    r = reduce(r.state, { type: 'revealDrained' });
+    expect(r.state.name).toBe('lingering');
+    const expected = unionRegion(regionA, regionB);
+    expect(r.state.region).toEqual(expected);
+    r = reduce(r.state, { type: 'timer', name: 'linger' });
+    expect(r.state.name).toBe('fading');
+    const fade = r.effects.find((e) => e.type === 'dissolve' && e.kind === 'fade');
+    expect(fade).toBeTruthy();
+    expect(fade.region).toEqual(expected);
+    expect(fade.region).not.toBeNull();
+  });
+});
+
+describe('unionRegion', () => {
+  it('returns the other when one side is null, else the bounding box', () => {
+    expect(unionRegion(null, regionA)).toBe(regionA);
+    expect(unionRegion(regionB, null)).toBe(regionB);
+    expect(unionRegion(regionA, regionB)).toEqual({
+      x0: Math.min(regionA.x0, regionB.x0), y0: Math.min(regionA.y0, regionB.y0),
+      x1: Math.max(regionA.x1, regionB.x1), y1: Math.max(regionA.y1, regionB.y1),
+    });
+  });
 });
 
 describe('reduce — an oracle error inks an excuse without persisting', () => {
@@ -132,6 +167,19 @@ describe('reduce — an oracle error inks an excuse without persisting', () => {
     expect(r.state.name).toBe('replying');
     expect(r.state.failed).toBe(true);
     expect(r.effects.find((e) => e.type === 'write').text).toContain('refused');
+    r = reduce(r.state, { type: 'revealDrained' });
+    expect(r.state.name).toBe('lingering');
+    expect(r.effects.some((e) => e.type === 'persist')).toBe(false);
+  });
+  it('buffered ink plus a co-arriving error keeps the real reply but marks the turn failed (no persist)', () => {
+    let r = reduce(initialState(), commit);
+    r = reduce(r.state, { type: 'oracleInk', text: 'The rain fell.' }); // buffered during drinking
+    r = reduce(r.state, { type: 'oracleError', text: 'http 500: boom' }); // error also buffered
+    r = reduce(r.state, { type: 'drinkDone' });
+    expect(r.state.name).toBe('replying');
+    expect(r.state.reply).toBe('The rain fell.'); // real ink, NOT the excuse
+    expect(r.state.failed).toBe(true);
+    expect(r.effects.find((e) => e.type === 'write').text).toBe('The rain fell.');
     r = reduce(r.state, { type: 'revealDrained' });
     expect(r.state.name).toBe('lingering');
     expect(r.effects.some((e) => e.type === 'persist')).toBe(false);
