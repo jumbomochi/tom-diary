@@ -43,3 +43,26 @@ export function settingsToConfig(settings) {
     remember: memoryEnabled(settings.memory),
   };
 }
+
+const SETTINGS_STORE = 'settings';
+const CONFIG_KEY = 'config';
+
+const reqPromise = (req) => new Promise((resolve, reject) => {
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => reject(req.error);
+});
+
+/** A tiny read/write wrapper over the single settings record. */
+export function createSettingsStore(db) {
+  const store = (mode) => db.transaction(SETTINGS_STORE, mode).objectStore(SETTINGS_STORE);
+  return {
+    async load() {
+      const row = await reqPromise(store('readonly').get(CONFIG_KEY));
+      return normalizeSettings(row ? row.value : undefined);
+    },
+    async save(settings) {
+      const value = normalizeSettings(settings);
+      await reqPromise(store('readwrite').put({ key: CONFIG_KEY, value }));
+    },
+  };
+}
