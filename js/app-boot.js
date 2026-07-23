@@ -17,4 +17,7 @@ const ink = initInk(canvas, {
   onHelp: () => showHelpPanel(document.body, { onDismiss: () => {} }),
 });
 window.__ink = ink;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('sw failed', e));
+}
 document.body.dataset.ready = 'true';

@@ -1,0 +1,13 @@
+{
+  "name": "The Diary",
+  "short_name": "Diary",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4ecd8",
+  "theme_color": "#f4ecd8",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
