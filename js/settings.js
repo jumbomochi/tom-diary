@@ -135,7 +135,7 @@ export function initSettingsGesture(canvas, { onOpen, holdMs = 600, cornerFrac =
     return x <= rect.width * cornerFrac && y <= rect.height * cornerFrac;
   };
   const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-  const onDown = (e) => { if (inCorner(e)) timer = setTimeout(() => { timer = null; onOpen(); }, holdMs); };
+  const onDown = (e) => { cancel(); if (inCorner(e)) timer = setTimeout(() => { timer = null; onOpen(); }, holdMs); };
   const onMove = (e) => { if (timer && !inCorner(e)) cancel(); };
   canvas.addEventListener('pointerdown', onDown, true); // capture: run before initInk
   canvas.addEventListener('pointermove', onMove, true);

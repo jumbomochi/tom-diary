@@ -13,7 +13,7 @@
   const canvas = document.getElementById('page');
   window.__opened = 0;
   initSettingsGesture(canvas, {
-    holdMs: 150,
+    holdMs: 120,
     onOpen: () => { window.__opened++; showSettings(document.body, { store, onClose: (s) => { window.__saved = s; } }); },
   });
   document.body.dataset.ready = 'true';
