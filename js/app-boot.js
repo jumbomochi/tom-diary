@@ -1,5 +1,7 @@
-import { initInk } from './ink.js';
-import { showHelpPanel } from './help.js';
+import { openMemoryDb } from './memory.js';
+import { loadFont } from './handwriting.js';
+import { createSettingsStore, showSettings, initSettingsGesture } from './settings.js';
+import { initApp } from './app.js';
 
 const canvas = document.getElementById('page');
 function resize() {
@@ -10,14 +12,23 @@ function resize() {
 }
 resize();
 
-const idle = Number(new URLSearchParams(location.search).get('idle')) || 2800;
-const ink = initInk(canvas, {
-  idleMs: idle,
-  onCommit: (uri) => { window.__lastCommit = uri; },
-  onHelp: () => showHelpPanel(document.body, { onDismiss: () => {} }),
-});
-window.__ink = ink;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('sw failed', e));
 }
+
+const db = await openMemoryDb();
+const settingsStore = createSettingsStore(db);
+const font = await loadFont('./fonts/DancingScript.ttf');
+
+// A corner long-press opens settings any time. Wired before initApp so its
+// capture-phase pointerdown listener is registered ahead of ink's (listeners
+// on the same target run in registration order within a phase bucket).
+initSettingsGesture(canvas, { onOpen: () => showSettings(document.body, { store: settingsStore, onClose: () => {} }) });
+
+initApp(canvas, { db, font, settingsStore });
+
+// First launch with no key: open settings straight away.
+const current = await settingsStore.load();
+if (!current.key) showSettings(document.body, { store: settingsStore, onClose: () => {} });
+
 document.body.dataset.ready = 'true';
