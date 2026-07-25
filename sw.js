@@ -1,13 +1,14 @@
 // App-shell service worker: precache everything the diary needs to run offline.
 // The oracle fetch is cross-origin and is never intercepted.
-const CACHE = 'tom-diary-v1';
+const CACHE = 'tom-diary-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/paper.css',
   './js/app-boot.js', './js/app.js', './js/statemachine.js', './js/settings.js',
   './js/ink.js', './js/commit.js', './js/help.js', './js/handwriting.js',
   './js/glyphs.js', './js/layout.js', './js/reveal.js', './js/dissolve.js',
   './js/skeleton.js', './js/oracle.js', './js/memory.js',
-  './vendor/opentype.mjs', './fonts/DancingScript.ttf', './icons/icon.svg',
+  './vendor/opentype.mjs', './vendor/perfect-freehand.mjs',
+  './fonts/DancingScript.ttf', './icons/icon.svg',
 ];
 
 self.addEventListener('install', (e) => {
