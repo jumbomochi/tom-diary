@@ -5,7 +5,7 @@ test('renderCommitPng returns a PNG data URI with black ink on white', async ({ 
   await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
   const result = await page.evaluate(() => {
     const strokes = [{ points: [
-      { x: 100, y: 100, r: 3 }, { x: 200, y: 100, r: 3 }, { x: 300, y: 100, r: 3 },
+      { x: 100, y: 100, pressure: 0.5 }, { x: 200, y: 100, pressure: 0.5 }, { x: 300, y: 100, pressure: 0.5 },
     ] }];
     const { box, uri } = window.runCommit(strokes, 1000, 1000);
     return { uri, outW: box.outW, outH: box.outH };
@@ -20,7 +20,7 @@ test('committed PNG is black ink on white paper', async ({ page }) => {
   await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
   const result = await page.evaluate(async () => {
     const strokes = [{ points: [
-      { x: 100, y: 100, r: 4 }, { x: 200, y: 100, r: 4 }, { x: 300, y: 100, r: 4 },
+      { x: 100, y: 100, pressure: 0.5 }, { x: 200, y: 100, pressure: 0.5 }, { x: 300, y: 100, pressure: 0.5 },
     ] }];
     const { uri } = window.runCommit(strokes, 1000, 1000);
     const img = new Image();
