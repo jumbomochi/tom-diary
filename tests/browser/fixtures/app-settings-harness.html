@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>app settings-suppression harness</title>
+<link rel="stylesheet" href="../../../css/paper.css">
+</head>
+<body>
+<canvas id="page" style="width:800px;height:600px"></canvas>
+<script type="module">
+  import { openMemoryDb, createMemoryStore } from '../../../js/memory.js';
+  import { createSettingsStore, showSettings, initSettingsGesture } from '../../../js/settings.js';
+  import { loadFont } from '../../../js/handwriting.js';
+  import { initApp } from '../../../js/app.js';
+
+  const canvas = document.getElementById('page');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Counting fake fetch: any oracle turn (i.e. any commit) increments this. A
+  // valid empty stream is returned so the parser terminates cleanly if it ever
+  // is called; the test asserts it is NOT.
+  window.__fetchCount = 0;
+  const sseResponse = () => {
+    const enc = new TextEncoder();
+    const body = new ReadableStream({ start(c) { c.enqueue(enc.encode('data: [DONE]\n')); c.close(); } });
+    return { status: 200, ok: true, body, text: async () => '' };
+  };
+  const fakeFetch = async () => { window.__fetchCount++; return sseResponse(); };
+
+  const db = await openMemoryDb();
+  const settingsStore = createSettingsStore(db);
+  // A real key is configured, so a junk commit WOULD reach askOracle -> fakeFetch
+  // (and persist a page): the test's fetch/memory assertions fail if suppression
+  // is removed.
+  await settingsStore.save({ key: 'sk-test', model: 'm', memory: 'on' });
+  window.__memory = createMemoryStore(db, { offsetHours: 0 });
+
+  const font = await loadFont('../../../fonts/DancingScript.ttf');
+
+  // Mirror app-boot.js's real wiring: the corner-hold opens Settings with ink
+  // suspended (setSettingsOpen(true) also erases the transient hold-dot); the
+  // panel's dismissal resumes ink. Gesture registered before initApp.
+  let app;
+  const openSettings = () => {
+    app.setSettingsOpen(true);
+    showSettings(document.body, { store: settingsStore, onClose: () => app.setSettingsOpen(false) });
+  };
+  initSettingsGesture(canvas, { onOpen: openSettings, holdMs: 150 });
+
+  app = initApp(canvas, { deps: { fetch: fakeFetch }, db, font, settingsStore, idleMs: 200 });
+  window.__app = app;
+
+  // Ink pixel count within a CSS-pixel region {x0,y0,x1,y1}, device-mapped like
+  // dissolve.js. Used to sample the top-left corner where the hold-dot lands.
+  const INK_LUMA = 200;
+  window.__inkPixelsIn = (region) => {
+    const c2 = canvas.getContext('2d');
+    const t = c2.getTransform();
+    const sx = t.a || 1, sy = t.d || 1;
+    const dx0 = Math.max(0, Math.round(region.x0 * sx));
+    const dy0 = Math.max(0, Math.round(region.y0 * sy));
+    const w = Math.max(0, Math.min(canvas.width - dx0, Math.round((region.x1 - region.x0 + 1) * sx)));
+    const h = Math.max(0, Math.min(canvas.height - dy0, Math.round((region.y1 - region.y0 + 1) * sy)));
+    if (w <= 0 || h <= 0) return 0;
+    const d = c2.getImageData(dx0, dy0, w, h).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (luma < INK_LUMA) n++;
+    }
+    return n;
+  };
+
+  document.body.dataset.ready = 'true';
+</script>
+</body></html>

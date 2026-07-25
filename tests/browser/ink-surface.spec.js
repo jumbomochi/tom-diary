@@ -10,7 +10,7 @@ async function stroke(page, pts, { pointerType = 'pen', pressure = 0.5 } = {}) {
 }
 
 test('writing then resting fires a commit with a PNG', async ({ page }) => {
-  await page.goto('/?idle=300'); // short idle for the test
+  await page.goto('/tests/browser/fixtures/ink-harness.html?idle=300'); // short idle for the test
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
   await stroke(page, [{ x: 200, y: 200 }, { x: 260, y: 210 }, { x: 320, y: 205 }]);
   await page.waitForFunction(() => window.__lastCommit != null, null, { timeout: 3000 });
@@ -19,7 +19,7 @@ test('writing then resting fires a commit with a PNG', async ({ page }) => {
 });
 
 test('a large "!" opens the help panel instead of committing', async ({ page }) => {
-  await page.goto('/?idle=300');
+  await page.goto('/tests/browser/fixtures/ink-harness.html?idle=300');
   const h = await page.evaluate(() => window.innerHeight);
   const barTop = h * 0.2, barBottom = h * 0.55;
   const bar = Array.from({ length: 20 }, (_, i) => ({ x: 400, y: barTop + (i * (barBottom - barTop)) / 19 }));
@@ -31,7 +31,7 @@ test('a large "!" opens the help panel instead of committing', async ({ page }) 
 });
 
 test('pointercancel does not wedge the idle-commit loop', async ({ page }) => {
-  await page.goto('/?idle=300');
+  await page.goto('/tests/browser/fixtures/ink-harness.html?idle=300');
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
 
   // Start a stroke, move a couple of times, then cancel it (no pointerup).
@@ -51,7 +51,7 @@ test('pointercancel does not wedge the idle-commit loop', async ({ page }) => {
 });
 
 test('a concurrent second pointer does not corrupt the active stroke', async ({ page }) => {
-  await page.goto('/?idle=99999'); // no idle commit interference
+  await page.goto('/tests/browser/fixtures/ink-harness.html?idle=99999'); // no idle commit interference
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
 
   const pointerType = 'pen', pressure = 0.5;

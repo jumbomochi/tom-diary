@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>gate harness</title>
+<style>html,body{margin:0;height:100%}#page{display:block;width:400px;height:400px;touch-action:none}</style>
+</head>
+<body>
+<canvas id="page"></canvas>
+<script type="module">
+  import { initInk } from '../../../js/ink.js';
+  const canvas = document.getElementById('page');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+  window.__accept = true;
+  window.__taps = 0;
+  const ink = initInk(canvas, {
+    idleMs: 300,
+    onCommit: () => { window.__committed = (window.__committed || 0) + 1; },
+    gate: { accepts: () => window.__accept, onBlockedTap: () => { window.__taps++; } },
+  });
+  window.__strokeCount = () => ink.store.strokes.length;
+  document.body.dataset.ready = 'true';
+</script>
+</body></html>

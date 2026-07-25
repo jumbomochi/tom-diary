@@ -132,13 +132,14 @@ const reqPromise = (req) => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
-/** Open (or create) the memory DB. keyPath 'id' = the page's commit timestamp. */
+/** Open (or create/upgrade) the DB. v2 adds the settings store beside pages. */
 export function openMemoryDb(factory = globalThis.indexedDB) {
   return new Promise((resolve, reject) => {
-    const req = factory.open(DB_NAME, 1);
+    const req = factory.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'key' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

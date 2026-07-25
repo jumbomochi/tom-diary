@@ -79,7 +79,8 @@ const PAPER = '#f4ecd8';
 const INK = '#33302a';
 const PRESSURE_GATE = 0.01; // ~ (>40 of 4096) from riddle main.rs:327
 
-export function initInk(canvas, { onCommit, onHelp, idleMs = 2800 } = {}) {
+export function initInk(canvas, { onCommit, onHelp, idleMs = 2800, gate } = {}) {
+  const inkGate = gate || { accepts: () => true, onBlockedTap: () => {} };
   const ctx = canvas.getContext('2d');
   const store = createStrokeStore();
   let penDown = false;
@@ -160,6 +161,7 @@ export function initInk(canvas, { onCommit, onHelp, idleMs = 2800 } = {}) {
 
   canvas.addEventListener('pointerdown', (e) => {
     if (penDown) return; // ignore secondary/concurrent pointers (palm, 2nd finger)
+    if (!inkGate.accepts()) { inkGate.onBlockedTap(); return; } // only Listening writes ink
     penDown = true;
     activePointerId = e.pointerId;
     try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* capture unsupported */ }

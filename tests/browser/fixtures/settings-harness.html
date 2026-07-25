@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>settings harness</title>
+<link rel="stylesheet" href="../../../css/paper.css">
+<style>#page{display:block;width:400px;height:400px;touch-action:none}</style>
+</head>
+<body>
+<canvas id="page"></canvas>
+<script type="module">
+  import { openMemoryDb } from '../../../js/memory.js';
+  import { createSettingsStore, showSettings, initSettingsGesture } from '../../../js/settings.js';
+  const db = await openMemoryDb();
+  const store = createSettingsStore(db);
+  const canvas = document.getElementById('page');
+  window.__opened = 0;
+  initSettingsGesture(canvas, {
+    holdMs: 120,
+    onOpen: () => { window.__opened++; showSettings(document.body, { store, onClose: (s) => { window.__saved = s; } }); },
+  });
+  document.body.dataset.ready = 'true';
+</script>
+</body></html>

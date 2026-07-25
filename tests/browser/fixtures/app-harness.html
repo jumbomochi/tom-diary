@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>app e2e harness</title>
+<link rel="stylesheet" href="../../../css/paper.css">
+</head>
+<body>
+<canvas id="page" style="width:800px;height:600px"></canvas>
+<script type="module">
+  import { openMemoryDb } from '../../../js/memory.js';
+  import { createSettingsStore } from '../../../js/settings.js';
+  import { createMemoryStore } from '../../../js/memory.js';
+  import { loadFont } from '../../../js/handwriting.js';
+  import { initApp } from '../../../js/app.js';
+
+  const canvas = document.getElementById('page');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Build a fake streaming Response from SSE chunks decided by window.__sse().
+  function sseResponse(chunks) {
+    const enc = new TextEncoder();
+    const body = new ReadableStream({ start(c) { for (const s of chunks) c.enqueue(enc.encode(s)); c.close(); } });
+    return { status: 200, ok: true, body, text: async () => '' };
+  }
+  const fakeFetch = async () => sseResponse(window.__sse());
+
+  const db = await openMemoryDb();
+  const settingsStore = createSettingsStore(db);
+  await settingsStore.save({ key: 'sk-test', model: 'm', memory: 'on' });
+  window.__memory = createMemoryStore(db, { offsetHours: 0 });
+
+  const font = await loadFont('../../../fonts/DancingScript.ttf');
+  const app = initApp(canvas, { deps: { fetch: fakeFetch }, db, font, settingsStore, idleMs: 200 });
+  window.__app = app;
+
+  // Whole-canvas "ink" pixel count (device pixels). The threshold is 200, not
+  // 100: fresh black ink is luma ~0, but a conjured page is deliberately
+  // replayed in a lighter FADED gray (js/app.js's FADED = '#787878', luma
+  // ~120) to signal "this is a memory" -- both must count as ink, while the
+  // cream paper (luma ~236) must not.
+  const INK_LUMA = 200;
+  window.__inkPixels = () => {
+    const d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (luma < INK_LUMA) n++;
+    }
+    return n;
+  };
+
+  // Ink pixel count within a CSS-pixel region {x0,y0,x1,y1}, mapped through
+  // the canvas's device-pixel transform the same way dissolve.js does, so this
+  // can sample exactly the region the state machine threaded through
+  // write()/appendChunk() -> revealPlanned -> lingering -> fading.
+  window.__inkPixelsIn = (region) => {
+    const c2 = canvas.getContext('2d');
+    const t = c2.getTransform();
+    const sx = t.a || 1, sy = t.d || 1;
+    const dx0 = Math.max(0, Math.round(region.x0 * sx));
+    const dy0 = Math.max(0, Math.round(region.y0 * sy));
+    const w = Math.max(0, Math.min(canvas.width - dx0, Math.round((region.x1 - region.x0 + 1) * sx)));
+    const h = Math.max(0, Math.min(canvas.height - dy0, Math.round((region.y1 - region.y0 + 1) * sy)));
+    if (w <= 0 || h <= 0) return 0;
+    const d = c2.getImageData(dx0, dy0, w, h).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (luma < INK_LUMA) n++;
+    }
+    return n;
+  };
+
+  document.body.dataset.ready = 'true';
+</script>
+</body></html>
