@@ -2,6 +2,7 @@
 
 import { createIdleTimer, computeCommitBox, renderCommitPng } from './commit.js';
 import { looksLikeExclamation } from './help.js';
+import { renderStroke } from './render-stroke.js';
 
 /**
  * Pressure→radius, ported from riddle main.rs:345 (normalized) + ink.rs:41 (growth cap).
@@ -64,54 +65,101 @@ export function isPageEmpty(strokes) {
 
 export function createStrokeStore() {
   let strokes = [];
-  let current = null;
   return {
     get strokes() { return strokes; },
-    begin(pt) { current = { points: [pt] }; },
-    extend(pt) { if (current) current.points.push(pt); },
-    end() { if (current && current.points.length) strokes.push(current); current = null; },
+    push(stroke) { strokes.push(stroke); },
     erase(x, y, r) { strokes = eraseStrokes(strokes, x, y, r); },
-    clear() { strokes = []; current = null; },
+    clear() { strokes = []; },
   };
 }
 
 const PAPER = '#f4ecd8';
-const INK = '#33302a';
 const PRESSURE_GATE = 0.01; // ~ (>40 of 4096) from riddle main.rs:327
 
 export function initInk(canvas, { onCommit, onHelp, idleMs = 2800, gate } = {}) {
   const inkGate = gate || { accepts: () => true, onBlockedTap: () => {} };
   const ctx = canvas.getContext('2d');
   const store = createStrokeStore();
-  let penDown = false;
-  let activePointerId = null;
-  let prevR = null;
-  let livePts = [];
-  let strokeStarted = false;
+
+  // Offscreen buffer holding paper + committed ink. Composited to the main
+  // canvas each frame while drawing; the in-progress stroke is drawn on main
+  // on top of it. perfect-freehand recomputes the whole stroke outline as it
+  // grows (the tail tapers), so we cannot additively paint — we redraw the
+  // committed layer under the live stroke every frame.
+  const layer = document.createElement('canvas');
+  const lctx = layer.getContext('2d');
 
   const cssW = () => canvas.clientWidth;
   const cssH = () => canvas.clientHeight;
+  const dpr = () => window.devicePixelRatio || 1;
 
-  function repaint() {
-    ctx.fillStyle = PAPER;
-    ctx.fillRect(0, 0, cssW(), cssH());
-    ctx.fillStyle = INK;
-    for (const s of store.strokes) drawStroke(s.points);
+  function fillPaper(c) { c.fillStyle = PAPER; c.fillRect(0, 0, cssW(), cssH()); }
+
+  function sizeLayer() {
+    layer.width = canvas.width;   // device px, mirrors the main backing store
+    layer.height = canvas.height;
+    lctx.setTransform(dpr(), 0, 0, dpr(), 0, 0); // draw in CSS px
   }
-  function drawStroke(points) {
-    for (const p of points) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r ?? 2, 0, Math.PI * 2);
-      ctx.fill();
+
+  // Rebuild the offscreen buffer from the store: paper + every committed stroke.
+  function rebuildLayer() {
+    fillPaper(lctx);
+    for (const s of store.strokes) {
+      renderStroke(lctx, s.points, { simulatePressure: !s.pen, last: true });
     }
+  }
+
+  // Copy the offscreen buffer onto main 1:1 in device pixels, bypassing main's
+  // DPR transform (getImage-style blit, so it is not double-scaled).
+  function blit() {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(layer, 0, 0);
+    ctx.restore();
+  }
+
+  function repaint() { rebuildLayer(); blit(); }          // after erase / resize
+  function clearInk() { store.clear(); fillPaper(lctx); }  // reset buffer; main left for the drink dissolve
+  function resize() { sizeLayer(); repaint(); }
+
+  sizeLayer();
+  fillPaper(lctx);
+
+  let penDown = false;
+  let activePointerId = null;
+  let livePts = [];
+  let strokeStarted = false;
+  let penKind = false;      // true when the active stroke is a real pen
+  let rafPending = false;
+
+  function scheduleFrame() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      if (!strokeStarted || livePts.length === 0) return;
+      blit(); // committed layer as the backdrop
+      renderStroke(ctx, livePts, { simulatePressure: !penKind, last: false });
+    });
+  }
+
+  // Append one sample to the live stroke. Returns false if the pen sample is
+  // below the contact-pressure gate (so we wait for real contact).
+  function pushSample(e) {
+    const pressure = e.pointerType === 'pen' ? e.pressure : 0.5;
+    if (e.pointerType === 'pen' && pressure < PRESSURE_GATE) return false;
+    const rect = canvas.getBoundingClientRect();
+    livePts.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, pressure });
+    strokeStarted = true;
+    return true;
   }
 
   const timer = createIdleTimer(idleMs, onIdle);
 
   function onIdle() {
     if (looksLikeExclamation(store.strokes, cssH())) {
-      store.clear();
-      repaint();
+      clearInk();
+      blit();
       if (onHelp) onHelp();
       return;
     }
@@ -122,36 +170,24 @@ export function initInk(canvas, { onCommit, onHelp, idleMs = 2800, gate } = {}) 
     if (onCommit) onCommit(uri, snapshot);
   }
 
-  function feed(e) {
-    const pressure = e.pointerType === 'pen' ? e.pressure : 0.5;
-    if (e.pointerType === 'pen' && pressure < PRESSURE_GATE) return; // wait for real contact
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const r = pressureToRadius(pressure, prevR);
-    prevR = r;
-    const pt = { x, y, r };
-    livePts.push(pt);
-    if (!strokeStarted) { store.begin(pt); strokeStarted = true; } else { store.extend(pt); }
-    ctx.fillStyle = INK;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   function endStroke(e, cancelled) {
     if (!penDown || e.pointerId !== activePointerId) return;
     penDown = false;
     try { canvas.releasePointerCapture(activePointerId); } catch (_) { /* not captured */ }
     activePointerId = null;
-    if (cancelled) {
-      if (strokeStarted) repaint(); // drop the partial in-flight stroke's pixels
-    } else if (strokeStarted) {
+    // Drop the in-flight stroke on cancel, or if ink became suppressed mid-stroke
+    // (e.g. Settings opened, clearing the store) — the store no longer holds the
+    // active stroke, so clearing it can't cancel this capture; the gate does.
+    if (cancelled || !inkGate.accepts()) {
+      if (strokeStarted) blit(); // drop the in-flight stroke's pixels
+    } else if (strokeStarted && livePts.length) {
       if (isEraserStroke(livePts)) {
         for (const p of livePts) store.erase(p.x, p.y, 22);
         repaint();
       } else {
-        store.end();
+        store.push({ points: livePts.slice(), pen: penKind });
+        renderStroke(lctx, livePts, { simulatePressure: !penKind, last: true });
+        blit();
       }
     }
     livePts = [];
@@ -164,21 +200,24 @@ export function initInk(canvas, { onCommit, onHelp, idleMs = 2800, gate } = {}) 
     if (!inkGate.accepts()) { inkGate.onBlockedTap(); return; } // only Listening writes ink
     penDown = true;
     activePointerId = e.pointerId;
+    penKind = e.pointerType === 'pen';
     try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* capture unsupported */ }
-    prevR = null;
     livePts = [];
     strokeStarted = false;
     timer.penDown();
-    feed(e); // may no-op if the first pen sample is below the pressure gate
+    pushSample(e); // may no-op if the first pen sample is below the pressure gate
+    scheduleFrame();
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!penDown || e.pointerId !== activePointerId) return;
-    feed(e);
+    const samples = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const s of (samples.length ? samples : [e])) pushSample(s);
     timer.activity();
+    scheduleFrame();
   });
   canvas.addEventListener('pointerup', (e) => endStroke(e, false));
   canvas.addEventListener('pointercancel', (e) => endStroke(e, true));
 
-  repaint();
-  return { store };
+  blit(); // show the (empty) paper buffer
+  return { store, repaint, clearInk, resize };
 }
