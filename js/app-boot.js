@@ -20,15 +20,25 @@ const db = await openMemoryDb();
 const settingsStore = createSettingsStore(db);
 const font = await loadFont('./fonts/DancingScript.ttf');
 
+// Open the Settings panel with ink fully suspended: setSettingsOpen(true) also
+// erases the transient corner hold-dot the gesture leaves behind, so no junk page
+// commits behind the panel; the panel's dismissal resumes ink.
+let app;
+const openSettings = () => {
+  app.setSettingsOpen(true);
+  showSettings(document.body, { store: settingsStore, onClose: () => app.setSettingsOpen(false) });
+};
+
 // A corner long-press opens settings any time. Wired before initApp so its
 // capture-phase pointerdown listener is registered ahead of ink's (listeners
-// on the same target run in registration order within a phase bucket).
-initSettingsGesture(canvas, { onOpen: () => showSettings(document.body, { store: settingsStore, onClose: () => {} }) });
+// on the same target run in registration order within a phase bucket); `app` is
+// a forward reference resolved by the time the hold completes.
+initSettingsGesture(canvas, { onOpen: openSettings });
 
 const current = await settingsStore.load();
-initApp(canvas, { db, font, settingsStore, offsetHours: current.tzOffset });
+app = initApp(canvas, { db, font, settingsStore, offsetHours: current.tzOffset });
 
 // First launch with no key: open settings straight away.
-if (!current.key) showSettings(document.body, { store: settingsStore, onClose: () => {} });
+if (!current.key) openSettings();
 
 document.body.dataset.ready = 'true';

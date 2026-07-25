@@ -112,3 +112,37 @@ test('a multi-chunk streamed reply threads its full region so the fade clears it
   const inRegionAfter = await page.evaluate((r) => window.__inkPixelsIn(r), region);
   expect(inRegionAfter).toBe(0);
 });
+
+test('opening Settings via a corner-hold suppresses ink: no hold-dot lingers and no junk page commits behind the panel', async ({ page }) => {
+  await page.goto('/tests/browser/fixtures/app-settings-harness.html');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
+
+  // Press-and-hold in the top-left corner (12% of 800x600 => x<=96, y<=72).
+  // The hold-dot is drawn by ink's pointerdown BEFORE the 150ms hold completes.
+  await page.dispatchEvent('#page', 'pointerdown', { clientX: 20, clientY: 20, pointerType: 'pen', pressure: 0.6, isPrimary: true, pointerId: 1 });
+  await expect(page.locator('.settings-panel')).toBeVisible({ timeout: 2000 });
+
+  // (a) Opening the panel erased the transient hold-dot: the corner is blank cream.
+  const cornerInk = await page.evaluate(() => window.__inkPixelsIn({ x0: 0, y0: 0, x1: 120, y1: 100 }));
+  expect(cornerInk).toBe(0);
+
+  // Release the hold pen, then try to draw a full stroke across the canvas while
+  // the panel is open. The gate must reject it (state stays 'listening', but
+  // settingsOpen is true), so nothing is recorded.
+  await page.dispatchEvent('#page', 'pointerup', { clientX: 20, clientY: 20, pointerType: 'pen', isPrimary: true, pointerId: 1 });
+  await page.dispatchEvent('#page', 'pointerdown', { clientX: 300, clientY: 300, pointerType: 'pen', pressure: 0.6, isPrimary: true, pointerId: 5 });
+  await page.dispatchEvent('#page', 'pointermove', { clientX: 360, clientY: 320, pointerType: 'pen', pressure: 0.6, isPrimary: true, pointerId: 5 });
+  await page.dispatchEvent('#page', 'pointermove', { clientX: 420, clientY: 340, pointerType: 'pen', pressure: 0.6, isPrimary: true, pointerId: 5 });
+  await page.dispatchEvent('#page', 'pointerup', { clientX: 420, clientY: 340, pointerType: 'pen', pressure: 0.6, isPrimary: true, pointerId: 5 });
+  expect(await page.evaluate(() => window.__app.store.strokes.length)).toBe(0);
+
+  // Close the panel (submit) -> ink resumes.
+  await page.click('.settings-save');
+  await expect(page.locator('.settings-panel')).toHaveCount(0);
+
+  // Well past the (200ms) idle window: no oracle turn ever fired and no page was
+  // persisted -- neither for the hold-dot nor the blocked stroke.
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => window.__fetchCount)).toBe(0);
+  expect(await page.evaluate(async () => (await window.__memory.all()).length)).toBe(0);
+});

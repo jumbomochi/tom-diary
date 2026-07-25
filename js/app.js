@@ -40,6 +40,7 @@ export function initApp(canvas, {
   let commitSnapshot = null; // strokes for persistence
   let currentConfig = null;
   let currentOffset = 0;
+  let settingsOpen = false; // true while the Settings panel is up: ink is fully suppressed
 
   const clearTimer = (name) => { if (timers.has(name)) { clearTimeout(timers.get(name)); timers.delete(name); } };
 
@@ -50,6 +51,15 @@ export function initApp(canvas, {
   }
 
   const app = { dispatch, getState: () => state, store: null };
+
+  // Suspend/resume ink while the Settings panel is open. Opening also erases the
+  // transient corner hold-dot the gesture leaves behind (clearing the store makes
+  // computeCommitBox return null, so no idle commit / oracle turn can fire for it),
+  // and repaints so nothing shows behind the panel.
+  app.setSettingsOpen = (open) => {
+    settingsOpen = open;
+    if (open) { app.store.clear(); paintPaper(); }
+  };
 
   // --- effect executors ---
   function runEffect(eff) {
@@ -168,8 +178,8 @@ export function initApp(canvas, {
     },
     onHelp: () => dispatch({ type: 'help' }),
     gate: {
-      accepts: () => state.name === 'listening',
-      onBlockedTap: () => dispatch({ type: 'penTap' }),
+      accepts: () => !settingsOpen && state.name === 'listening',
+      onBlockedTap: () => { if (!settingsOpen) dispatch({ type: 'penTap' }); },
     },
   });
   app.store = inkSurface.store;

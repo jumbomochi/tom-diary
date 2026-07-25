@@ -33,6 +33,12 @@ The app is static files with **no build step**, so Pages serves the repo as-is.
    the service worker caches the shell (HTML/CSS/JS, the font, `opentype.mjs`)
    so it opens offline — only the oracle call needs Wi-Fi.
 
+> **On every deploy, bump the `CACHE` constant in `sw.js`** (e.g.
+> `tom-diary-v1` → `-v2`). The worker serves the shell cache-first under that
+> fixed name, so already-installed clients keep serving the old cached assets
+> until the cache name changes — without a bump, updated HTML/CSS/JS never reach
+> them.
+
 ## How it works
 
 - `js/ink.js` — pen capture, live ink, scribble-erase, idle-commit, the "!" help gesture.
