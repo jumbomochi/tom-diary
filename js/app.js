@@ -18,13 +18,15 @@ import {
 const PAPER = '#f4ecd8';
 const FADED = '#787878';
 
-export function initApp(canvas, { deps = {}, db, font, settingsStore, idleMs = 2800 } = {}) {
+export function initApp(canvas, {
+  deps = {}, db, font, settingsStore, idleMs = 2800, offsetHours = 0,
+} = {}) {
   const ctx = canvas.getContext('2d');
   const cssW = () => canvas.clientWidth;
   const cssH = () => canvas.clientHeight;
   const paintPaper = () => { ctx.fillStyle = PAPER; ctx.fillRect(0, 0, cssW(), cssH()); };
 
-  const memory = createMemoryStore(db, { offsetHours: 0 });
+  const memory = createMemoryStore(db, { offsetHours });
   const settings = settingsStore || createSettingsStore(db);
   const writer = createReplyWriter(canvas, font, { px: 96, color: '#000000' });
   const headProvider = createGlyphCache(font, 54);

@@ -25,10 +25,10 @@ const font = await loadFont('./fonts/DancingScript.ttf');
 // on the same target run in registration order within a phase bucket).
 initSettingsGesture(canvas, { onOpen: () => showSettings(document.body, { store: settingsStore, onClose: () => {} }) });
 
-initApp(canvas, { db, font, settingsStore });
+const current = await settingsStore.load();
+initApp(canvas, { db, font, settingsStore, offsetHours: current.tzOffset });
 
 // First launch with no key: open settings straight away.
-const current = await settingsStore.load();
 if (!current.key) showSettings(document.body, { store: settingsStore, onClose: () => {} });
 
 document.body.dataset.ready = 'true';

@@ -11,12 +11,12 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  // Cache each shell asset independently so a single missing/failing entry
-  // (e.g. a file not yet added by a later task) can't abort precaching of
-  // the rest of the shell.
+  // Atomic precache: the whole shell caches or the install fails visibly,
+  // rather than silently shipping a partial (and therefore unreliable
+  // offline) shell.
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => Promise.all(SHELL.map((url) => c.add(url).catch((err) => console.warn('sw: precache failed', url, err)))))
+      .then((c) => c.addAll(SHELL))
       .then(() => self.skipWaiting()),
   );
 });
