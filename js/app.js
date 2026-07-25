@@ -18,6 +18,16 @@ import {
 const PAPER = '#f4ecd8';
 const FADED = '#787878';
 
+/** Size a canvas's backing store to its CSS box at the current DPR, and apply
+ *  the matching draw transform. Returns the DPR used. */
+export function sizeCanvasBacking(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(canvas.clientWidth * dpr);
+  canvas.height = Math.round(canvas.clientHeight * dpr);
+  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+  return dpr;
+}
+
 export function initApp(canvas, {
   deps = {}, db, font, settingsStore, idleMs = 2800, offsetHours = 0,
 } = {}) {
@@ -64,7 +74,7 @@ export function initApp(canvas, {
   // --- effect executors ---
   function runEffect(eff) {
     switch (eff.type) {
-      case 'clearInk': app.store.clear(); break;
+      case 'clearInk': inkSurface.clearInk(); break;
       case 'startOracle': startOracle(eff.uri); break;
       case 'dissolve': runDissolveEffect(eff.region, eff.kind); break;
       case 'blot': eff.on ? startBlot() : stopBlot(); break;
@@ -81,7 +91,7 @@ export function initApp(canvas, {
       case 'persist': persist(eff.id, eff.transcript, eff.reply); break;
       case 'conjure': conjure(eff.id); break;
       case 'restoreCanvas': restoreCanvas(); break;
-      case 'clearScreen': paintPaper(); break;
+      case 'clearScreen': inkSurface.clearInk(); paintPaper(); break;
       case 'openHelp':
         showHelpPanel(document.body, { onDismiss: () => dispatch({ type: 'helpDismissed' }) });
         break;
@@ -183,6 +193,11 @@ export function initApp(canvas, {
     },
   });
   app.store = inkSurface.store;
+
+  app.resize = () => {
+    sizeCanvasBacking(canvas);   // re-size main + re-apply its DPR transform
+    inkSurface.resize();         // re-size the offscreen layer + repaint the page
+  };
 
   paintPaper();
   return app;

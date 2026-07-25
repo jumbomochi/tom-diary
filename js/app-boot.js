@@ -1,16 +1,10 @@
 import { openMemoryDb } from './memory.js';
 import { loadFont } from './handwriting.js';
 import { createSettingsStore, showSettings, initSettingsGesture } from './settings.js';
-import { initApp } from './app.js';
+import { initApp, sizeCanvasBacking } from './app.js';
 
 const canvas = document.getElementById('page');
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * dpr;
-  canvas.height = canvas.clientHeight * dpr;
-  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-resize();
+sizeCanvasBacking(canvas);
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('sw failed', e));
@@ -40,5 +34,18 @@ app = initApp(canvas, { db, font, settingsStore, offsetHours: current.tzOffset }
 
 // First launch with no key: open settings straight away.
 if (!current.key) openSettings();
+
+// Re-size the canvas backing store + offscreen ink layer on viewport changes
+// (mobile URL bar show/hide, rotation, on-screen keyboard, window resize, DPR
+// change) so pointer coords keep mapping to where ink actually lands. Debounced
+// so a burst of resize events only triggers one re-layout.
+let resizeTimer = null;
+const onViewportChange = () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => app.resize(), 100);
+};
+window.addEventListener('resize', onViewportChange);
+window.visualViewport?.addEventListener('resize', onViewportChange);
+window.addEventListener('orientationchange', onViewportChange);
 
 document.body.dataset.ready = 'true';
