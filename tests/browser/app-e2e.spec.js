@@ -146,3 +146,30 @@ test('opening Settings via a corner-hold suppresses ink: no hold-dot lingers and
   expect(await page.evaluate(() => window.__fetchCount)).toBe(0);
   expect(await page.evaluate(async () => (await window.__memory.all()).length)).toBe(0);
 });
+
+test('opening then closing Settings resets the offscreen ink layer: no ghost of the pre-open stroke reappears', async ({ page }) => {
+  await page.goto('/tests/browser/fixtures/app-settings-harness.html');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
+
+  // Draw a stroke well outside the corner-hold zone, before Settings is ever opened.
+  const firstRegion = { x0: 190, y0: 190, x1: 410, y1: 220 };
+  await penStroke(page, [{ x: 200, y: 200 }, { x: 300, y: 210 }, { x: 400, y: 205 }]);
+  await expect.poll(() => page.evaluate((r) => window.__inkPixelsIn(r), firstRegion)).toBeGreaterThan(0);
+
+  // Open Settings, then close it -- directly via the app API (app.js's
+  // setSettingsOpen), same call the corner-hold gesture drives in production.
+  // `open` must clear both the stroke store AND the offscreen layer (ink.js's
+  // clearInk()), not just the store, or the layer's stale pixels reappear on
+  // the very next blit().
+  await page.evaluate(() => window.__app.setSettingsOpen(true));
+  await page.evaluate(() => window.__app.setSettingsOpen(false));
+
+  // Draw a second, short stroke in a different region.
+  const secondRegion = { x0: 490, y0: 440, x1: 550, y1: 470 };
+  await penStroke(page, [{ x: 500, y: 450 }, { x: 540, y: 460 }]);
+  await expect.poll(() => page.evaluate((r) => window.__inkPixelsIn(r), secondRegion)).toBeGreaterThan(0);
+
+  // No ghost: the first stroke's region is back to blank paper even after the
+  // next blit() composited the (reset) offscreen layer under the new stroke.
+  expect(await page.evaluate((r) => window.__inkPixelsIn(r), firstRegion)).toBe(0);
+});

@@ -68,7 +68,7 @@ export function initApp(canvas, {
   // and repaints so nothing shows behind the panel.
   app.setSettingsOpen = (open) => {
     settingsOpen = open;
-    if (open) { app.store.clear(); paintPaper(); }
+    if (open) { inkSurface.clearInk(); paintPaper(); }
   };
 
   // --- effect executors ---
