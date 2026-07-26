@@ -194,6 +194,16 @@ export function initApp(canvas, {
   });
   app.store = inkSurface.store;
 
+  // Re-size on viewport change so pointer coords keep mapping to where ink
+  // lands (the reason this exists). inkSurface.resize() rebuilds main from the
+  // stroke store. KNOWN LIMITATION: content that lives only on main and not in
+  // the store — a reply being written, the thinking blot, a conjured page — is
+  // NOT restored, so a viewport change mid-turn (e.g. rotating a tablet during
+  // a reply) blanks it to paper, and a pending conjure `savedImage` captured at
+  // the old dimensions will mis-align on restoreCanvas. This is transient and
+  // data-safe (memory is unaffected); the screen recovers on the next turn or
+  // tap. Accepted for now; a proper fix would snapshot+rescale main (and
+  // savedImage) across the resize when state.name !== 'listening'.
   app.resize = () => {
     sizeCanvasBacking(canvas);   // re-size main + re-apply its DPR transform
     inkSurface.resize();         // re-size the offscreen layer + repaint the page
