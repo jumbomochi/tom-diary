@@ -28,11 +28,9 @@ describe('isPageEmpty', () => {
 });
 
 describe('createStrokeStore', () => {
-  it('accumulates a finished stroke', () => {
+  it('accumulates a pushed stroke', () => {
     const s = createStrokeStore();
-    s.begin({ x: 0, y: 0, r: 2 });
-    s.extend({ x: 5, y: 0, r: 2 });
-    s.end();
+    s.push({ points: [{ x: 0, y: 0, pressure: 0.5 }, { x: 5, y: 0, pressure: 0.5 }], pen: false });
     expect(s.strokes).toHaveLength(1);
     expect(s.strokes[0].points).toHaveLength(2);
   });

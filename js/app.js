@@ -18,6 +18,16 @@ import {
 const PAPER = '#f4ecd8';
 const FADED = '#787878';
 
+/** Size a canvas's backing store to its CSS box at the current DPR, and apply
+ *  the matching draw transform. Returns the DPR used. */
+export function sizeCanvasBacking(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(canvas.clientWidth * dpr);
+  canvas.height = Math.round(canvas.clientHeight * dpr);
+  canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+  return dpr;
+}
+
 export function initApp(canvas, {
   deps = {}, db, font, settingsStore, idleMs = 2800, offsetHours = 0,
 } = {}) {
@@ -58,13 +68,13 @@ export function initApp(canvas, {
   // and repaints so nothing shows behind the panel.
   app.setSettingsOpen = (open) => {
     settingsOpen = open;
-    if (open) { app.store.clear(); paintPaper(); }
+    if (open) { inkSurface.clearInk(); paintPaper(); }
   };
 
   // --- effect executors ---
   function runEffect(eff) {
     switch (eff.type) {
-      case 'clearInk': app.store.clear(); break;
+      case 'clearInk': inkSurface.clearInk(); break;
       case 'startOracle': startOracle(eff.uri); break;
       case 'dissolve': runDissolveEffect(eff.region, eff.kind); break;
       case 'blot': eff.on ? startBlot() : stopBlot(); break;
@@ -81,7 +91,7 @@ export function initApp(canvas, {
       case 'persist': persist(eff.id, eff.transcript, eff.reply); break;
       case 'conjure': conjure(eff.id); break;
       case 'restoreCanvas': restoreCanvas(); break;
-      case 'clearScreen': paintPaper(); break;
+      case 'clearScreen': inkSurface.clearInk(); paintPaper(); break;
       case 'openHelp':
         showHelpPanel(document.body, { onDismiss: () => dispatch({ type: 'helpDismissed' }) });
         break;
@@ -183,6 +193,21 @@ export function initApp(canvas, {
     },
   });
   app.store = inkSurface.store;
+
+  // Re-size on viewport change so pointer coords keep mapping to where ink
+  // lands (the reason this exists). inkSurface.resize() rebuilds main from the
+  // stroke store. KNOWN LIMITATION: content that lives only on main and not in
+  // the store — a reply being written, the thinking blot, a conjured page — is
+  // NOT restored, so a viewport change mid-turn (e.g. rotating a tablet during
+  // a reply) blanks it to paper, and a pending conjure `savedImage` captured at
+  // the old dimensions will mis-align on restoreCanvas. This is transient and
+  // data-safe (memory is unaffected); the screen recovers on the next turn or
+  // tap. Accepted for now; a proper fix would snapshot+rescale main (and
+  // savedImage) across the resize when state.name !== 'listening'.
+  app.resize = () => {
+    sizeCanvasBacking(canvas);   // re-size main + re-apply its DPR transform
+    inkSurface.resize();         // re-size the offscreen layer + repaint the page
+  };
 
   paintPaper();
   return app;

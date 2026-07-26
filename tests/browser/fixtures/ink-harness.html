@@ -24,6 +24,13 @@
     onHelp: () => showHelpPanel(document.body, { onDismiss: () => {} }),
   });
   window.__ink = ink;
+  window.__resize = () => {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(canvas.clientWidth * dpr);
+    canvas.height = Math.round(canvas.clientHeight * dpr);
+    canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+    ink.resize();
+  };
   document.body.dataset.ready = 'true';
 </script>
 </body></html>

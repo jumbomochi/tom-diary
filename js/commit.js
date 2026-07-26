@@ -1,4 +1,5 @@
 // Idle-commit timing + commit geometry. Pure logic; renderCommitPng touches canvas.
+import { renderStroke } from './render-stroke.js';
 
 /**
  * Ported from riddle main.rs: IDLE_COMMIT window measured from the last pen
@@ -48,17 +49,11 @@ export function renderCommitPng(strokes, box) {
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#000000';
+  // Map full-resolution stroke coords into the downscaled box: px -> (px-x0)/f.
   const f = box.factor;
+  ctx.setTransform(1 / f, 0, 0, 1 / f, -box.x0 / f, -box.y0 / f);
   for (const s of strokes) {
-    for (const p of s.points) {
-      const x = (p.x - box.x0) / f;
-      const y = (p.y - box.y0) / f;
-      const r = Math.max(0.5, (p.r ?? 2) / f);
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    renderStroke(ctx, s.points, { color: '#000000', simulatePressure: !s.pen, last: true });
   }
   return canvas.toDataURL('image/png');
 }
