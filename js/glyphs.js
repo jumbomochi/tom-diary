@@ -1,6 +1,6 @@
 // Browser wiring: opentype.js glyph outlines + offscreen-canvas rasterization
 // + skeleton.js, exposed as the layout provider planReply consumes.
-import { thinZhangSuen, traceSkeleton } from './skeleton.js';
+import { thinZhangSuen, traceSkeleton, smoothPolyline } from './skeleton.js';
 
 export async function loadFont(url) {
   const opentype = await import('../vendor/opentype.mjs');
@@ -33,7 +33,10 @@ function traceGlyph(font, char, px, lineH, ascent, advance) {
     if (luma < INK_THRESHOLD) mask[i] = 1;
   }
   thinZhangSuen(mask, boxW, lineH);
-  const strokes = traceSkeleton(mask, boxW, lineH);
+  // Smooth the pixel-grid skeleton to sub-pixel curves so the reveal's stroke
+  // stamping follows clean paths instead of the ±1px thinning staircase. Point
+  // count is preserved, so reveal timing is unchanged.
+  const strokes = traceSkeleton(mask, boxW, lineH).map((s) => smoothPolyline(s, { passes: 2, window: 2 }));
   return { advance, strokes };
 }
 

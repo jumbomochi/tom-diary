@@ -81,3 +81,32 @@ export function traceSkeleton(mask, w, h, minPoints = 3) {
   strokes.sort((a, b) => Math.min(...a.map(([x]) => x)) - Math.min(...b.map(([x]) => x)));
   return strokes;
 }
+
+/**
+ * Low-pass smooth a traced polyline: replace each interior point with the mean
+ * of its neighbours within `window` on each side, repeated `passes` times.
+ * Endpoints are pinned and the point count is preserved, so a downstream reveal
+ * keeps the same timing (pointsPerTick / lingerMs are unaffected). This removes
+ * the ±1px staircase that Zhang-Suen thinning + the 8-connected walk leave on
+ * the centreline, without changing the letter shape. Points are [x,y] (integer
+ * grid coords in, sub-pixel float coords out). Polylines shorter than 3 points
+ * are returned as fresh [x,y] copies, unchanged in value.
+ */
+export function smoothPolyline(points, { passes = 2, window = 2 } = {}) {
+  const n = points.length;
+  if (n < 3) return points.map((p) => [p[0], p[1]]);
+  let cur = points.map((p) => [p[0], p[1]]);
+  for (let pass = 0; pass < passes; pass++) {
+    const next = cur.map((p) => [p[0], p[1]]); // endpoints copied, interiors overwritten
+    for (let i = 1; i < n - 1; i++) {
+      const lo = Math.max(0, i - window);
+      const hi = Math.min(n - 1, i + window);
+      let sx = 0, sy = 0;
+      for (let j = lo; j <= hi; j++) { sx += cur[j][0]; sy += cur[j][1]; }
+      const cnt = hi - lo + 1;
+      next[i] = [sx / cnt, sy / cnt];
+    }
+    cur = next;
+  }
+  return cur;
+}
