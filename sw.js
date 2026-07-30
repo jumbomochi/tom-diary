@@ -1,6 +1,6 @@
 // App-shell service worker: precache everything the diary needs to run offline.
 // The oracle fetch is cross-origin and is never intercepted.
-const CACHE = 'tom-diary-v4';
+const CACHE = 'tom-diary-v5';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/paper.css',
   './js/app-boot.js', './js/app.js', './js/statemachine.js', './js/settings.js',

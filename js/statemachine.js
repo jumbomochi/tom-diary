@@ -41,14 +41,16 @@ export function unionRegion(a, b) {
   };
 }
 
-/** Enter replying with an initial batch of chunks (first uses write, rest append). */
-function enterReplying({ id, transcript = '', chunks, failed = false, ended = false, extra = [] }) {
+/**
+ * Enter replying with the COMPLETE reply, revealed in one pass. The oracle
+ * stream has already ended by the time we get here (the whole reply is buffered
+ * first), so there is no append path and no stream/reveal race to track.
+ */
+function enterReplyingFull({ id, transcript = '', chunks, failed = false, extra = [] }) {
   const reply = chunks.join(' ').trim();
-  const effects = [...extra, { type: 'write', text: chunks[0] }];
-  for (const t of chunks.slice(1)) effects.push({ type: 'append', text: t });
   return R(
-    { name: 'replying', id, transcript, reply, totalPoints: 0, region: null, drained: false, ended, failed },
-    effects,
+    { name: 'replying', id, transcript, reply, totalPoints: 0, region: null, failed },
+    [...extra, { type: 'write', text: reply }],
   );
 }
 
@@ -56,27 +58,35 @@ function enterReplying({ id, transcript = '', chunks, failed = false, ended = fa
 function enterExcuse(id, rawError, extra = []) {
   const text = oracleExcuse(rawError);
   return R(
-    { name: 'replying', id, transcript: '', reply: text, totalPoints: 0, region: null, drained: false, ended: true, failed: true },
+    { name: 'replying', id, transcript: '', reply: text, totalPoints: 0, region: null, failed: true },
     [...extra, { type: 'write', text }],
   );
 }
 
-/** After the drink, act on whatever the oracle buffered (or start thinking). */
+/**
+ * Stream ended: reveal the buffered reply, or ink an excuse. Keep the real ink
+ * even if an error co-arrived — mark the turn failed (which suppresses the
+ * memory persist) but do not replace the reply with an excuse. Ported from
+ * riddle main.rs:577-581 (keep-ink + turn_failed).
+ */
+function resolveReply(s, extra = []) {
+  if (s.chunks.length > 0) {
+    return enterReplyingFull({ id: s.id, transcript: s.transcript || '', chunks: s.chunks, failed: s.error != null, extra });
+  }
+  if (s.error != null) return enterExcuse(s.id, s.error, extra);
+  return enterExcuse(s.id, 'empty reply', extra);
+}
+
+/**
+ * After the drink: reveal the reply if the stream already finished, otherwise
+ * keep buffering while the thinking blot shows until the stream ends. Buffering
+ * the whole reply lets the layout fit it to the screen before it is written.
+ */
 function afterDrink(s) {
   if (s.show != null) return R({ name: 'conjuring' }, [{ type: 'conjure', id: s.show }]);
-  if (s.chunks.length > 0) {
-    // Keep the real ink even if an error co-arrived: mark the turn failed (which
-    // suppresses the memory persist) but do not replace the reply with an excuse.
-    // Ported from riddle main.rs:577-581 (keep-ink + turn_failed).
-    return enterReplying({
-      id: s.id, transcript: s.transcript || '', chunks: s.chunks,
-      // A buffered error terminates the oracle stream, so the turn has ended.
-      ended: s.ended || s.error != null, failed: s.error != null,
-    });
-  }
-  if (s.error != null) return enterExcuse(s.id, s.error);
+  if (s.ended) return resolveReply(s);
   return R(
-    { name: 'thinking', id: s.id, transcript: s.transcript || '' },
+    { name: 'thinking', id: s.id, transcript: s.transcript || '', chunks: s.chunks, error: s.error },
     [{ type: 'blot', on: true }, { type: 'schedule', name: 'patience', ms: 120000 }],
   );
 }
@@ -119,15 +129,12 @@ export function reduce(state, ev) {
       if (ev.type === 'oracleShow') {
         return R({ name: 'conjuring' }, [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }, { type: 'conjure', id: ev.id }]);
       }
-      if (ev.type === 'oracleInk') {
-        return enterReplying({
-          id: state.id, transcript: state.transcript, chunks: [ev.text],
-          extra: [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }],
-        });
-      }
+      // Buffer the reply as it streams; keep the blot up until the stream ends.
+      if (ev.type === 'oracleInk') return R({ ...state, chunks: [...state.chunks, ev.text] });
       if (ev.type === 'oracleTranscript') return R({ ...state, transcript: ev.text });
-      if (ev.type === 'oracleError') {
-        return enterExcuse(state.id, ev.text, [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }]);
+      if (ev.type === 'oracleError') return R({ ...state, error: ev.text });
+      if (ev.type === 'oracleEnd') {
+        return resolveReply(state, [{ type: 'blot', on: false }, { type: 'cancelTimer', name: 'patience' }]);
       }
       if (ev.type === 'timer' && ev.name === 'patience') {
         return enterExcuse(state.id, 'timed out', [{ type: 'blot', on: false }]);
@@ -135,10 +142,7 @@ export function reduce(state, ev) {
       return R(state);
 
     case 'replying': {
-      if (ev.type === 'oracleInk') {
-        return R({ ...state, reply: (state.reply + ' ' + ev.text).trim() }, [{ type: 'append', text: ev.text }]);
-      }
-      if (ev.type === 'oracleTranscript') return R({ ...state, transcript: ev.text });
+      // The full reply is revealed in one pass (the stream already ended).
       if (ev.type === 'revealPlanned') {
         return R({
           ...state,
@@ -146,15 +150,7 @@ export function reduce(state, ev) {
           region: unionRegion(state.region, ev.region),
         });
       }
-      if (ev.type === 'oracleError') return R({ ...state, ended: true, failed: true });
-      if (ev.type === 'oracleEnd') {
-        const next = { ...state, ended: true };
-        return next.drained ? toLingering(next) : R(next);
-      }
-      if (ev.type === 'revealDrained') {
-        const next = { ...state, drained: true };
-        return next.ended ? toLingering(next) : R(next);
-      }
+      if (ev.type === 'revealDrained') return toLingering(state);
       return R(state);
     }
 

@@ -37,16 +37,31 @@ export function makeWobble(seed = 0x1234) {
 
 /**
  * Lay reply text into screen-space polylines: word-wrapped, each line centered
- * horizontally and shifted by its wobble, stacked from the upper third down.
- * (main.rs:861-891)
+ * horizontally and shifted by its wobble. For the main reply (`yStart == null`)
+ * the whole block is scaled down to fit the usable screen height when it would
+ * otherwise overflow, then vertically centered — so a long reply is never cut
+ * off (short replies are unscaled). Scaling is geometric on the planned
+ * strokes, so the glyph smoothing is preserved. A caller that passes an
+ * explicit `yStart` (conjure) keeps its own placement, unscaled. (main.rs:861-891)
  */
 export function planReply(text, provider, opts) {
-  const { screenW, screenH, marginX = 120, yStart = null } = opts;
+  const { screenW, screenH, marginX = 120, yStart = null, marginY = 60, minScale = 0.4 } = opts;
   const maxW = screenW - 2 * marginX;
-  const lineH = provider.lineHeight;
+  const lineHBase = provider.lineHeight;
   const lines = wrapLines(text, maxW, provider.measure);
-  const totalH = lineH * lines.length;
-  let y = yStart ?? Math.max(Math.floor((screenH - totalH) / 3), 60);
+  const totalHBase = lineHBase * lines.length;
+
+  // Fit-to-height + vertical centering for the main reply block.
+  let scale = 1;
+  let y;
+  if (yStart == null) {
+    const availH = screenH - 2 * marginY;
+    scale = Math.min(1, Math.max(minScale, availH / (totalHBase || 1)));
+    y = Math.max(marginY, Math.floor((screenH - totalHBase * scale) / 2));
+  } else {
+    y = yStart;
+  }
+  const lineH = lineHBase * scale;
   const wobble = makeWobble(0x1234);
 
   const strokes = [];
@@ -55,10 +70,10 @@ export function planReply(text, provider, opts) {
 
   for (const lineText of lines) {
     const { width, strokes: lineStrokes } = provider.line(lineText);
-    const x0 = Math.round((screenW - width) / 2);
+    const x0 = Math.round((screenW - width * scale) / 2);
     const wob = wobble();
     for (const s of lineStrokes) {
-      const mapped = s.map(([sx, sy]) => [x0 + sx, y + sy + wob]);
+      const mapped = s.map(([sx, sy]) => [x0 + sx * scale, y + sy * scale + wob]);
       for (const [px, py] of mapped) {
         x0b = Math.min(x0b, px - 5); y0b = Math.min(y0b, py - 5);
         x1b = Math.max(x1b, px + 5); y1b = Math.max(y1b, py + 5);

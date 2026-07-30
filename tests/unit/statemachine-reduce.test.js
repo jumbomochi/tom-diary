@@ -30,17 +30,37 @@ describe('reduce — commit starts the drink and the oracle concurrently', () =>
   });
 });
 
-describe('reduce — oracle events during drinking are buffered until drinkDone', () => {
-  it('buffers ink and, on drinkDone, writes it and enters replying', () => {
+describe('reduce — the whole reply is buffered until the stream ends, then written once', () => {
+  it('ink without a stream-end at drinkDone keeps buffering (thinking, no write yet)', () => {
+    const { state, effects } = run([commit, { type: 'oracleInk', text: 'Hello.' }, { type: 'drinkDone' }]);
+    expect(state.name).toBe('thinking');
+    expect(state.chunks).toEqual(['Hello.']);
+    expect(types(effects)).not.toContain('write');
+    expect(effects).toContainEqual({ type: 'blot', on: true });
+  });
+  it('a stream that ended during the drink writes the full reply on drinkDone', () => {
     const { state, effects } = run([
       commit,
       { type: 'oracleInk', text: 'Hello.' },
+      { type: 'oracleEnd' },
       { type: 'drinkDone' },
     ]);
     expect(state.name).toBe('replying');
     expect(state.reply).toBe('Hello.');
-    expect(types(effects)).toContain('write');
     expect(effects.find((e) => e.type === 'write').text).toBe('Hello.');
+  });
+  it('multiple buffered sentences are joined into one write', () => {
+    const { state, effects } = run([
+      commit,
+      { type: 'oracleInk', text: 'Hello.' },
+      { type: 'oracleInk', text: 'Who writes?' },
+      { type: 'oracleEnd' },
+      { type: 'drinkDone' },
+    ]);
+    expect(state.name).toBe('replying');
+    expect(state.reply).toBe('Hello. Who writes?');
+    expect(effects.find((e) => e.type === 'write').text).toBe('Hello. Who writes?');
+    expect(types(effects)).not.toContain('append');
   });
   it('with no oracle event yet, drinkDone enters thinking (blot + patience timer)', () => {
     const { state, effects } = run([commit, { type: 'drinkDone' }]);
@@ -55,13 +75,19 @@ describe('reduce — oracle events during drinking are buffered until drinkDone'
   });
 });
 
-describe('reduce — thinking', () => {
-  it('first ink turns off the blot, cancels patience, and writes', () => {
-    const { state, effects } = run([commit, { type: 'drinkDone' }, { type: 'oracleInk', text: 'Who writes?' }]);
-    expect(state.name).toBe('replying');
-    expect(effects).toContainEqual({ type: 'blot', on: false });
-    expect(effects).toContainEqual({ type: 'cancelTimer', name: 'patience' });
-    expect(effects).toContainEqual({ type: 'write', text: 'Who writes?' });
+describe('reduce — thinking buffers the stream, writes on oracleEnd', () => {
+  it('ink in thinking buffers (no write) and only writes when the stream ends', () => {
+    let r = run([commit, { type: 'drinkDone' }, { type: 'oracleInk', text: 'a' }, { type: 'oracleInk', text: 'b' }]);
+    expect(r.state.name).toBe('thinking');
+    expect(r.state.chunks).toEqual(['a', 'b']);
+    expect(types(r.effects)).not.toContain('write');
+    // Stream ends -> the blot goes off, patience is cancelled, and the full reply is written.
+    r = reduce(r.state, { type: 'oracleEnd' });
+    expect(r.state.name).toBe('replying');
+    expect(r.state.reply).toBe('a b');
+    expect(r.effects).toContainEqual({ type: 'blot', on: false });
+    expect(r.effects).toContainEqual({ type: 'cancelTimer', name: 'patience' });
+    expect(r.effects.find((e) => e.type === 'write').text).toBe('a b');
   });
   it('a transcript-only event keeps thinking and stores the transcript', () => {
     const { state, effects } = run([commit, { type: 'drinkDone' }, { type: 'oracleTranscript', text: 'it rained' }]);
@@ -77,35 +103,34 @@ describe('reduce — thinking', () => {
     const { state, effects } = run([commit, { type: 'drinkDone' }, { type: 'timer', name: 'patience' }]);
     expect(state.name).toBe('replying');
     expect(state.failed).toBe(true);
-    const w = effects.find((e) => e.type === 'write');
-    expect(w.text).toContain('Wi-Fi'); // oracleExcuse('timed out')
+    expect(effects.find((e) => e.type === 'write').text).toContain('Wi-Fi'); // oracleExcuse('timed out')
   });
 });
 
 describe('reduce — replying → lingering (persist) → fading → listening', () => {
-  it('appends streamed chunks and lingers only once the stream ends AND the reveal drains', () => {
-    let r = reduce(initialState(), commit);
-    r = reduce(r.state, { type: 'drinkDone' });        // -> thinking
-    r = reduce(r.state, { type: 'oracleInk', text: 'Hello.' }); // -> replying, write
-    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 80, region: regionA });
-    r = reduce(r.state, { type: 'oracleInk', text: 'Who writes?' }); // append
-    expect(r.effects).toContainEqual({ type: 'append', text: 'Who writes?' });
-    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 120, region: regionB });
-    // reveal drains before the stream ends: stay replying
-    r = reduce(r.state, { type: 'revealDrained' });
+  it('reveals the full reply, then lingers (persist) once the reveal drains', () => {
+    let r = run([
+      commit,
+      { type: 'oracleInk', text: 'Hello.' },
+      { type: 'oracleInk', text: 'Who writes?' },
+      { type: 'oracleEnd' },
+      { type: 'drinkDone' }, // -> replying, single write
+    ]);
     expect(r.state.name).toBe('replying');
-    // stream ends: now go to lingering, persist, schedule linger with the summed points
-    r = reduce(r.state, { type: 'oracleEnd' });
+    r = reduce(r.state, { type: 'revealPlanned', totalPoints: 200, region: regionA });
+    r = reduce(r.state, { type: 'revealDrained' });
     expect(r.state.name).toBe('lingering');
     expect(r.effects).toContainEqual({ type: 'persist', id: 1751856000, transcript: '', reply: 'Hello. Who writes?' });
     expect(r.effects).toContainEqual({ type: 'schedule', name: 'linger', ms: Math.min(4000 + 200 * 2, 20000) });
   });
   it('a stored transcript rides along to persist', () => {
-    let r = reduce(initialState(), commit);
-    r = reduce(r.state, { type: 'oracleInk', text: 'Hi.' });
-    r = reduce(r.state, { type: 'drinkDone' });
-    r = reduce(r.state, { type: 'oracleTranscript', text: 'the rain came' });
-    r = reduce(r.state, { type: 'oracleEnd' });
+    let r = run([
+      commit,
+      { type: 'oracleInk', text: 'Hi.' },
+      { type: 'oracleTranscript', text: 'the rain came' },
+      { type: 'oracleEnd' },
+      { type: 'drinkDone' },
+    ]);
     r = reduce(r.state, { type: 'revealDrained' });
     expect(r.state.name).toBe('lingering');
     expect(r.effects.find((e) => e.type === 'persist').transcript).toBe('the rain came');
@@ -124,17 +149,12 @@ describe('reduce — replying → lingering (persist) → fading → listening',
     expect(r.effects).toContainEqual({ type: 'cancelTimer', name: 'linger' });
     expect(r.effects).toContainEqual({ type: 'dissolve', region, kind: 'fade' });
   });
-  it('threads the reply region (unioned across reveals) all the way to the fade dissolve', () => {
-    // Full path: commit -> drinking (with buffered chunk) -> replying ->
-    // revealPlanned(A) -> append + revealPlanned(B) -> oracleEnd + revealDrained
-    // -> lingering -> (timer linger) -> fading. The fade must erase the whole reply.
-    let r = reduce(initialState(), commit);
-    r = reduce(r.state, { type: 'oracleInk', text: 'Hello.' });
-    r = reduce(r.state, { type: 'drinkDone' });                     // -> replying
+  it('threads the reply region (unioned across reveal-planned events) to the fade dissolve', () => {
+    let r = run([
+      commit, { type: 'oracleInk', text: 'Hello.' }, { type: 'oracleEnd' }, { type: 'drinkDone' },
+    ]);
     r = reduce(r.state, { type: 'revealPlanned', totalPoints: 80, region: regionA });
-    r = reduce(r.state, { type: 'oracleInk', text: 'Who writes?' });
     r = reduce(r.state, { type: 'revealPlanned', totalPoints: 120, region: regionB });
-    r = reduce(r.state, { type: 'oracleEnd' });
     r = reduce(r.state, { type: 'revealDrained' });
     expect(r.state.name).toBe('lingering');
     const expected = unionRegion(regionA, regionB);
@@ -142,7 +162,6 @@ describe('reduce — replying → lingering (persist) → fading → listening',
     r = reduce(r.state, { type: 'timer', name: 'linger' });
     expect(r.state.name).toBe('fading');
     const fade = r.effects.find((e) => e.type === 'dissolve' && e.kind === 'fade');
-    expect(fade).toBeTruthy();
     expect(fade.region).toEqual(expected);
     expect(fade.region).not.toBeNull();
   });
@@ -160,10 +179,12 @@ describe('unionRegion', () => {
 });
 
 describe('reduce — an oracle error inks an excuse without persisting', () => {
-  it('errors mid-thinking → replying(excuse), failed, no persist on drain', () => {
-    let r = reduce(initialState(), commit);
-    r = reduce(r.state, { type: 'drinkDone' });
-    r = reduce(r.state, { type: 'oracleError', text: 'http 401: bad key' });
+  it('an error with no ink → excuse on stream-end, failed, no persist on drain', () => {
+    let r = run([
+      commit, { type: 'drinkDone' },
+      { type: 'oracleError', text: 'http 401: bad key' }, // buffered in thinking
+      { type: 'oracleEnd' },                              // resolve -> excuse
+    ]);
     expect(r.state.name).toBe('replying');
     expect(r.state.failed).toBe(true);
     expect(r.effects.find((e) => e.type === 'write').text).toContain('refused');
@@ -172,10 +193,13 @@ describe('reduce — an oracle error inks an excuse without persisting', () => {
     expect(r.effects.some((e) => e.type === 'persist')).toBe(false);
   });
   it('buffered ink plus a co-arriving error keeps the real reply but marks the turn failed (no persist)', () => {
-    let r = reduce(initialState(), commit);
-    r = reduce(r.state, { type: 'oracleInk', text: 'The rain fell.' }); // buffered during drinking
-    r = reduce(r.state, { type: 'oracleError', text: 'http 500: boom' }); // error also buffered
-    r = reduce(r.state, { type: 'drinkDone' });
+    let r = run([
+      commit,
+      { type: 'oracleInk', text: 'The rain fell.' }, // buffered during drinking
+      { type: 'oracleError', text: 'http 500: boom' }, // error also buffered
+      { type: 'oracleEnd' },
+      { type: 'drinkDone' },
+    ]);
     expect(r.state.name).toBe('replying');
     expect(r.state.reply).toBe('The rain fell.'); // real ink, NOT the excuse
     expect(r.state.failed).toBe(true);
@@ -183,6 +207,12 @@ describe('reduce — an oracle error inks an excuse without persisting', () => {
     r = reduce(r.state, { type: 'revealDrained' });
     expect(r.state.name).toBe('lingering');
     expect(r.effects.some((e) => e.type === 'persist')).toBe(false);
+  });
+  it('an empty stream (no ink, no error) inks the "said nothing" excuse', () => {
+    const r = run([commit, { type: 'oracleEnd' }, { type: 'drinkDone' }]);
+    expect(r.state.name).toBe('replying');
+    expect(r.state.failed).toBe(true);
+    expect(r.effects.find((e) => e.type === 'write').text).toContain('said nothing');
   });
 });
 
@@ -207,7 +237,7 @@ describe('reduce — help / conjuring / memory dismissal', () => {
     expect(r.state.name).toBe('listening');
     expect(r.effects).toContainEqual({ type: 'restoreCanvas' });
   });
-  it('ink events are ignored while drinking is not the concern (no crash on stray events)', () => {
+  it('stray events do not crash idle states', () => {
     expect(reduce({ name: 'fading', region }, { type: 'penTap' }).state.name).toBe('fading');
     expect(reduce(initialState(), { type: 'oracleInk', text: 'x' }).state.name).toBe('listening');
   });
