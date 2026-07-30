@@ -83,11 +83,6 @@ export function initApp(canvas, {
         dispatch({ type: 'revealPlanned', totalPoints: s.totalPoints, region: s.region });
         break;
       }
-      case 'append': {
-        const s = writer.appendChunk(eff.text);
-        dispatch({ type: 'revealPlanned', totalPoints: s.totalPoints, region: s.region });
-        break;
-      }
       case 'persist': persist(eff.id, eff.transcript, eff.reply); break;
       case 'conjure': conjure(eff.id); break;
       case 'restoreCanvas': restoreCanvas(); break;
