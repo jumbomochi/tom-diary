@@ -1,6 +1,17 @@
 // Browser wiring: opentype.js glyph outlines + offscreen-canvas rasterization
 // + skeleton.js, exposed as the layout provider planReply consumes.
-import { thinZhangSuen, traceSkeleton, smoothPolyline } from './skeleton.js';
+import { thinZhangSuen, traceSkeleton, smoothPolyline, smoothPolylineTaubin } from './skeleton.js';
+
+// Default reply-stroke smoothing: Taubin λ|μ (shape-preserving low-pass) removes
+// the skeleton's residual wobble without shrinking the letterforms.
+export const DEFAULT_SMOOTH = { method: 'taubin', iters: 20, lambda: 0.5, mu: -0.53 };
+
+/** Smooth one traced skeleton stroke per the smoothing config. */
+function smoothStroke(stroke, smooth) {
+  if (!smooth || smooth.method === 'none') return stroke.map((p) => [p[0], p[1]]);
+  if (smooth.method === 'box') return smoothPolyline(stroke, smooth);
+  return smoothPolylineTaubin(stroke, smooth);
+}
 
 export async function loadFont(url) {
   const opentype = await import('../vendor/opentype.mjs');
@@ -11,7 +22,7 @@ export async function loadFont(url) {
 const INK_THRESHOLD = 128; // glyph drawn black-on-white offscreen; ink if luma < this
 
 /** Rasterize one glyph into the shared line box and trace its skeleton. */
-function traceGlyph(font, char, px, lineH, ascent, advance) {
+function traceGlyph(font, char, px, lineH, ascent, advance, smooth) {
   const glyph = font.charToGlyph(char);
   const boxW = Math.max(1, Math.ceil(advance) + 4);
   const canvas = document.createElement('canvas');
@@ -34,13 +45,13 @@ function traceGlyph(font, char, px, lineH, ascent, advance) {
   }
   thinZhangSuen(mask, boxW, lineH);
   // Smooth the pixel-grid skeleton to sub-pixel curves so the reveal's stroke
-  // stamping follows clean paths instead of the ±1px thinning staircase. Point
-  // count is preserved, so reveal timing is unchanged.
-  const strokes = traceSkeleton(mask, boxW, lineH).map((s) => smoothPolyline(s, { passes: 2, window: 2 }));
+  // stamping follows clean paths instead of the ±1px thinning staircase and its
+  // residual wobble. Point count is preserved, so reveal timing is unchanged.
+  const strokes = traceSkeleton(mask, boxW, lineH).map((s) => smoothStroke(s, smooth));
   return { advance, strokes };
 }
 
-export function createGlyphCache(font, px = 96) {
+export function createGlyphCache(font, px = 96, smooth = DEFAULT_SMOOTH) {
   const lineHeight = Math.floor(px * 1.25);
   const scale = px / font.unitsPerEm;
   const ascent = font.ascender * scale;
@@ -60,7 +71,7 @@ export function createGlyphCache(font, px = 96) {
   const glyphOf = (char) => {
     let g = cache.get(char);
     if (!g) {
-      g = traceGlyph(font, char, px, lineHeight, ascent, advanceOf(char));
+      g = traceGlyph(font, char, px, lineHeight, ascent, advanceOf(char), smooth);
       cache.set(char, g);
     }
     return g;

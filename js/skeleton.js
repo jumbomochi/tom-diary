@@ -110,3 +110,28 @@ export function smoothPolyline(points, { passes = 2, window = 2 } = {}) {
   }
   return cur;
 }
+
+/**
+ * Taubin λ|μ smoothing: alternate a shrinking Laplacian pass (factor λ>0) with
+ * an anti-shrinking inflation pass (factor μ<0, |μ|>λ), `iters` times. This is
+ * a low-pass that removes wobble like a moving average but, unlike it, does not
+ * shrink or flatten the curve — so cursive strokes get much smoother while
+ * keeping their size and cusps. Endpoints pinned; point count preserved. Points
+ * are [x,y]; integer grid coords in, sub-pixel float coords out.
+ */
+export function smoothPolylineTaubin(points, { iters = 8, lambda = 0.5, mu = -0.53 } = {}) {
+  const n = points.length;
+  if (n < 3) return points.map((p) => [p[0], p[1]]);
+  let cur = points.map((p) => [p[0], p[1]]);
+  const pass = (factor) => {
+    const next = cur.map((p) => [p[0], p[1]]); // endpoints copied, interiors moved
+    for (let i = 1; i < n - 1; i++) {
+      const lx = (cur[i - 1][0] + cur[i + 1][0]) / 2 - cur[i][0]; // discrete Laplacian
+      const ly = (cur[i - 1][1] + cur[i + 1][1]) / 2 - cur[i][1];
+      next[i] = [cur[i][0] + factor * lx, cur[i][1] + factor * ly];
+    }
+    cur = next;
+  };
+  for (let k = 0; k < iters; k++) { pass(lambda); pass(mu); }
+  return cur;
+}
